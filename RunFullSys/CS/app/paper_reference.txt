@@ -1,0 +1,1331 @@
+1
+
+PQABSE-SRM: Adaptive Post-Quantum
+Multi-Keyword Searchable Encryption with Secure
+Revocation for Mobile Cloud
+Anawin Suwannapha, Peeravich Teerapatanapan, Worathun Termjitcharoen, Thanayos Ongpisut , Somchart
+Fugkeaw
+School of Information, Computer and Communication Technology (ICT)
+Sirindhorn International Institute of Technology, Thammasat University, Thailand
+6622780573@g.siit.tu.ac.th, 6622780649@g.siit.tu.ac.th, 6622790168@g.siit.tu.ac.th, 6622780672@g.siit.tu.ac.th,
+somchart@siit.tu.ac.th
+
+Abstract—Mobile cloud systems increasingly rely on searchable
+encryption to enable secure data outsourcing with efficient
+retrieval. However, supporting multi-keyword search in postquantum (PQ) settings remains highly challenging due to the
+computational complexity of lattice-based cryptography and the
+resource constraints of mobile devices. Existing solutions either
+rely on classical cryptographic assumptions vulnerable to quantum attacks, or incur prohibitive overhead when directly adopting PQ primitives. Moreover, they often lack efficient batch query
+processing, adaptive search optimization, and scalable revocation
+mechanisms. In this paper, we propose PQABSE-SRM, a postquantum attribute-based searchable encryption framework with
+secure revocation tailored for mobile cloud environments. The
+proposed framework introduces a lightweight client paradigm in
+which mobile data owners perform only symmetric encryption
+and hashing, while computationally intensive lattice-based operations are securely offloaded to edge servers equipped with
+trusted execution environments (TEEs). To support efficient
+multi-keyword search, we design a batch trapdoor construction
+combined with an adaptive bitmap-based pruning strategy, significantly reducing communication and computation overhead. Furthermore, we develop a search-coupled, epoch-driven revocation
+mechanism that performs candidate-selective, just-in-time reencryption, eliminating the need for costly system-wide updates
+while ensuring revocation soundness and forward security. The
+framework also incorporates zero-knowledge authentication and
+blockchain-anchored state management to provide verifiable and
+consistent access control. Security analysis demonstrates that
+PQABSE-SRM achieves IND-CPA confidentiality, adaptive INDCKA search privacy, forward privacy, and revocation soundness
+under standard lattice assumptions. Experimental evaluation
+shows that the proposed scheme significantly reduces client-side
+overhead and achieves efficient sub-linear search performance
+compared to existing approaches.
+Keywords—Post-quantum
+cryptography,
+attribute-based
+searchable encryption, mobile cloud computing, data sharing,
+access control, revocation, lattice-based cryptography.
+
+I. I NTRODUCTION
+The rapid adoption of mobile cloud computing has fundamentally transformed how sensitive data is generated, stored,
+and accessed across distributed environments. In domains such
+as healthcare, finance, and smart infrastructure, mobile devices
+continuously produce large volumes of data that must be
+securely outsourced while remaining searchable for timely
+decision-making. Searchable Encryption (SE) has emerged
+
+as a key cryptographic primitive to enable keyword-based
+retrieval over encrypted data [21], [24]. However, designing
+efficient and secure multi-keyword search in post-quantum
+mobile cloud environments remains highly non-trivial.
+First, most existing SE schemes rely on classical cryptographic assumptions such as discrete logarithms or bilinear
+pairings, which are vulnerable to quantum attacks [11], [12].
+Transitioning to post-quantum (PQ) constructions based on
+lattice assumptions (e.g., LWE/MLWE) introduces significant
+computational overhead due to high-dimensional matrix operations and noise sampling [2], [4], [15]. This makes direct
+deployment on resource-constrained mobile devices impractical [17], [28].
+Second, supporting multi-keyword search in PQ settings
+is inherently expensive [20]. Unlike single-keyword search,
+multi-keyword queries require either repeated trapdoor generation or complex query structures, leading to increased communication cost and server-side computation [25]. Existing PQSE schemes often lack efficient mechanisms for batch query
+processing and scalable candidate filtering.
+Third, revocation and dynamic access control remain major
+challenges [23], [29]. Traditional revocation approaches either
+require re-encryption of all ciphertexts or rely on inefficient
+key update mechanisms, which are unsuitable for large-scale
+mobile cloud systems [30].Furthermore, many designs fail
+to tightly integrate revocation with the searchable encryption
+process, resulting in stale access rights or inconsistent system
+states [16].
+Finally, existing systems often overlook practical deployment constraints. In particular, there is a fundamental mismatch between the heavy computational requirements of PQ
+cryptography and the limited resources of mobile devices.
+Simply porting lattice-based constructions to mobile environments leads to unacceptable latency and energy consumption
+[17].
+To address these challenges, we propose PQABSE-SRM, a
+Post-Quantum Attribute-Based Searchable Encryption framework with Secure Revocation for Mobile cloud systems. The
+key idea is to decouple lightweight client operations from
+heavy cryptographic computation by leveraging trusted edge
+
+2
+
+servers equipped with Trusted Execution Environments (TEEs)
+[27], while simultaneously introducing adaptive and leakageaware search mechanisms.
+In PQABSE-SRM, mobile data owners perform only
+lightweight symmetric encryption and hashing, while computationally intensive lattice-based operations (e.g., ABSE
+encapsulation and index embedding) are securely offloaded
+to edge/TEE nodes. To enable efficient multi-keyword search,
+the framework introduces a batch trapdoor construction and
+an adaptive bitmap-based pruning strategy [14], significantly
+reducing both communication and computation overhead [26].
+Furthermore, we design a search-coupled, epoch-driven revocation mechanism that performs candidate-selective, just-intime re-encryption, eliminating the need for costly systemwide updates. The system also incorporates zero-knowledge
+authentication and blockchain-anchored state management to
+ensure verifiable and consistent access control [3], [6]. Contri-
+
+have focused on Module-LWE (MLWE) to balance security
+and implementation efficiency [2], extending these capabilities to verifiable multi-authority environments where keyword
+search must remain robust across diverse attribute domains
+[5]. Beyond standard lattices, Hou et al. [20] proposed multikeyword search with fine-grained control, while semanticaware indexing has been explored to improve search accuracy
+in IoT contexts [21]. Furthermore, Yousefipoor and Eghlidos
+[26] introduced the first attribute-based encryption scheme
+based on rank metric codes and Low Rank Parity Check
+(LRPC) codes. This approach is particularly relevant for
+mobile systems as it utilizes Bloom filters for access structure
+representation and result completeness verification, enabling
+fast ”fail-fast” checks before executing heavy lattice math.
+Additionally, authenticated encryption with keyword search
+has been reinforced against quantum-resistant instantiations to
+prevent keyword guessing attacks [24].
+
+butions. The main contributions of this paper are summarized
+as follows:
+• Post-Quantum Searchable Encryption for Mobile
+Cloud. We design a PQ-secure multi-keyword searchable
+encryption framework tailored for mobile environments,
+addressing the fundamental mismatch between latticebased cryptography and resource-constrained devices.
+• Edge-Assisted Lightweight Encryption Architecture.
+We propose a hybrid execution model where mobile
+devices perform only lightweight operations, while heavy
+lattice-based computations are securely offloaded to edge
+servers equipped with TEEs, achieving both efficiency
+and security.
+• Adaptive and Batch Multi-Keyword Search. We introduce a batch trapdoor construction and an adaptive
+search strategy that dynamically selects efficient query
+execution paths, significantly reducing search complexity
+and communication overhead.
+• Search-Coupled Epoch-Based Revocation. We develop
+a novel revocation mechanism that combines epoch transition with candidate-selective, just-in-time re-encryption,
+tightly integrating access control with the search process
+while avoiding global ciphertext updates.
+• Leakage-Aware and Verifiable Framework. We formalize the leakage profile and incorporate zero-knowledge
+authentication and blockchain anchoring to ensure
+privacy-preserving, verifiable, and consistent system operation.
+
+B. Revocation and Mobile Efficiency
+User revocation remains a primary bottleneck in AttributeBased Encryption (ABE). Traditional proxy re-encryption
+(PRE) models provided the foundation for delegating ciphertext updates to a cloud provider [9], but these often
+require batch re-processing that drains mobile resources. In
+mobile cloud contexts, energy consumption is a critical metric;
+research shows that upcoming NIST standards place significant
+strain on mobile batteries during key generation and encapsulation [17], [28]. To counter this, ”IoT-friendly” schemes
+utilize pre-computation and outsourcing to shift the heavy
+lifting from the device to the edge or cloud [1], [13]. Recent
+implementations have integrated revocation features directly
+into the lattice structure [16]. For instance, Wang et al. [29],
+[30] developed revocable IBEET and ABE schemes tailored
+for 6G-enabled IIoT and mobile cloud environments, focusing
+on hidden policies and epoch-based updates. Forward security
+has also been prioritized, ensuring that even if a secret key
+is compromised, previous search queries remain secure [23].
+Efficiency is further enhanced in edge-driven systems, where
+search operations are optimized for transportation and mobile
+data sharing [27].
+
+II. R ELATED W ORKS
+A. Post-Quantum and Expressive ABSE
+With the standardization of Module-Lattice-Based KeyEncapsulation (FIPS 203) and Digital Signatures (FIPS 204)
+by NIST [11], [12], the academic community has accelerated
+the shift toward Learning With Errors (LWE) and Ring-LWE
+(R-LWE) primitives. Early lattice-based searchable schemes
+demonstrated the feasibility of O(n) keyword matching in
+cloud environments [15], while subsequent works like CPABSEL introduced specific ciphertext-policy structures to
+improve access control granularity [4]. Recent optimizations
+
+C. Privacy-Preserving Authentication
+To manage user identities without a single point of failure,
+decentralized ledgers have been integrated into the cryptographic pipeline. Blockchain-based systems provide an immutable log for identity-based searchable signcryption, particularly in sensitive domains like medical data sharing [3].
+These frameworks often utilize Efficient Sparse Merkle Trees
+to track registration and revocation states with minimal storage
+overhead [6]. To maintain user privacy, anonymous attestation
+and Fiat-Shamir with aborts are employed to generate zeroknowledge proofs (ZKPs), ensuring that a user’s global identifier (GID) remains hidden during the search process while
+maintaining mathematical non-repudiation [7], [8].
+D. High-Dimensional Search and Bitmap Optimization
+The performance of multi-keyword search is often limited
+by the high dimensionality of encrypted indexes [19]. Early
+
+3
+
+bitmap compression techniques, such as Word Aligned Hybrid
+(WAH) variants, were used to handle massive traffic data but
+struggled with high-density similarity searches [18]. The introduction of Roaring Bitmaps [14] marked a significant advancement, utilizing a hybrid container strategy that adapts to data
+sparsity. By integrating these optimized bitmaps with attributebased logic, our framework aims to prune the search space at
+bit-level speeds. Recent developments in serverless architectures have further explored updatable searchable encryption
+with scalable on-demand result processing to handle multiauthority environments [22], [25]. Finally, the shift toward
+online/offline encryption ensures that the most computationally
+expensive components of the search are prepared before the
+mobile user even initiates a query [10].
+III. O UR P ROPOSED S YSTEM
+A. System Model
+We consider a post-quantum, multi-keyword searchable
+encryption framework for mobile cloud systems, consisting
+of the following entities:
+1) Mobile Data Owner (MDO): The MDO extracts keywords from plaintext data and defines an LSSS-based
+access policy. It encrypts data using a lightweight symmetric cipher and protects both the encryption key and
+keywords using a lattice-based ABSE scheme. A secure
+searchable index is generated to support multi-keyword
+queries, and the ciphertext bundle is uploaded to the
+Cloud Server.
+2) Mobile Data User (MDU): The MDU holds attributebased secret keys. To perform a multi-keyword query, it
+generates trapdoors for queried keywords and produces
+a zero-knowledge proof of valid (non-revoked) identity.
+The request is signed using a post-quantum signature
+and sent to the Cloud Server. Upon receiving results, the
+MDU verifies access policy and decrypts the data.
+3) Edge/TEE Node: A trusted edge server equipped with
+Trusted Execution Environments (TEEs) assists in performing computationally intensive lattice-based operations, such as key encapsulation and index construction,
+on behalf of mobile devices.
+4) Cloud Server (CS): The CS stores ciphertexts and processes search queries. It verifies authentication and proof
+validity, then performs efficient multi-keyword search
+using a Search Optimization Layer (SOL), which applies
+inverted indexing and bitmap-based pruning to reduce the
+search space before lattice-based verification.
+5) Trusted Authority (TA): The TA initializes system
+parameters and issues attribute-based keys. It manages
+revocation by updating system epochs and distributing reencryption keys to the Cloud Server and update tokens to
+valid users, enabling efficient revocation without global
+ciphertext updates.
+6) Identity Authority (IA): The IA maintains registration
+and revocation states using Merkle trees. It provides users
+with authentication proofs and updates the system state
+upon registration or revocation.
+
+7) Blockchain and Smart Contracts: The blockchain
+stores global system states, including registration and
+revocation roots. Smart contracts verify updates and ensure consistent, tamper-proof state transitions, allowing
+decentralized verification of user legitimacy.
+Figure 1 illustrates the overall system architecture of the
+proposed PQABSE-SRM framework, highlighting the interactions among core entities and the secure multi-keyword search
+workflow.
+B. Threat Model
+We consider a standard adversarial model in mobile cloud
+searchable encryption, consisting of the following entities:
+1) External Adversary: An external attacker may eavesdrop, replay, or modify communications, and may possess
+quantum computational capabilities to break classical
+cryptographic schemes. The adversary may also attempt
+keyword guessing or trapdoor inference attacks.
+2) Honest-but-Curious Cloud Server: The Cloud Server
+follows the protocol correctly but attempts to infer sensitive information from stored ciphertexts, searchable indexes, and query patterns. In particular, it may try to learn
+keyword information, access patterns, or relationships
+among queried data.
+3) Revoked or Unauthorized Users: A revoked user may
+attempt to access updated ciphertexts using previously issued keys, while unauthorized users may attempt attribute
+collusion or generate forged trapdoors to bypass access
+control.
+Security Objectives. To address the above threats, the proposed framework ensures:
+Post-Quantum Data Confidentiality: Data and keyword
+security are protected under the hardness of RLWE-based
+constructions.
+• Fine-Grained Access Control: LSSS-based policies prevent attribute collusion and enforce correct authorization.
+• Multi-Keyword Search Privacy: Trapdoors are randomized and unlinkable, preventing the Cloud Server from
+recovering queried keywords.
+• Revocation Soundness: Epoch-based key update mechanisms ensure that revoked users cannot access newly
+updated ciphertexts.
+• Authentication and Replay Protection: Blockchainanchored verification and timestamp validation prevent
+impersonation and replay attacks.
+• Controlled Leakage: The system may reveal limited
+access patterns due to search optimization; however,
+keyword contents and plaintext data remain hidden.
+•
+
+C. System Process
+The proposed framework operates through five phases:
+system initialization, user registration, data encryption, secure
+multi-keyword search and retrieval, and user revocation. Table I summarizes the notations used in the system process.
+
+4
+
+Fig. 1. Overall system architecture of the PQABSE-SRM framework.
+
+TABLE I
+N OTATION S UMMARY
+Symbol
+m
+W
+Q
+(M, ρ)
+P K, M SK
+SK
+CTdata
+CTK
+IW
+TQ
+Vtag
+Rootreg
+Rootrev
+RK
+UK
+πGID
+σ
+Bw
+Ccand
+
+Description
+Plaintext data
+Keyword set extracted from data
+Multi-keyword query set
+LSSS access policy
+Public parameters and master secret key
+User secret key
+Symmetric ciphertext
+Encrypted symmetric key
+Secure keyword index
+Trapdoor set for query Q
+System version tag (epoch identifier)
+Registration Merkle root
+Revocation Merkle root
+Re-encryption key
+Key update token
+Zero-knowledge identity proof
+Digital signature (Dilithium)
+Bitmap for keyword w
+Candidate file set after pruning
+
+Phase 1: System Initialization: Phase 1 establishes
+the global cryptographic parameters, identity structures, and
+search infrastructure required for secure and efficient multikeyword searchable encryption.
+Step 1: Cryptographic Setup. The Trusted Authority (TA)
+initializes the system by executing:
+Setup(1λ ) → (P K, M SK),
+
+where λ is the security parameter. The setup algorithm defines
+the lattice parameters, including modulus q, dimensions, and
+error distribution χ, under RLWE assumptions.
+The public parameters P K are used for encryption and
+trapdoor generation, while the master secret key M SK is
+retained by the TA for user key generation. In addition, the
+TA generates a post-quantum signature key pair:
+sig
+(P KTsig
+A , SKT A ),
+
+which is used to authenticate system-level operations.
+Step 2: Identity Structure Initialization. The Identity Authority (IA) initializes two Merkle trees:
+• Registration Tree: storing valid user identities,
+• Revocation Tree: tracking revoked users.
+The initial roots are computed as:
+Rootreg ,
+
+Rootrev ,
+
+which represent the global identity state of the system.
+Step 3: Blockchain Deployment. The IA anchors the initial
+Merkle roots on the blockchain by invoking smart contract
+functions:
+UpdateRoot(Rootreg , Rootrev ).
+This establishes the initial system epoch, denoted by the
+version tag:
+Vtag ← Rootrev .
+
+5
+
+The blockchain acts as a global, immutable state repository,
+ensuring consistency of identity and revocation information
+across all entities.
+Step 4: Search Infrastructure Initialization. The Cloud
+Server (CS) initializes the Search Optimization Layer (SOL),
+which includes:
+• an inverted index mapping keywords to file identifiers,
+• compressed bitmap structures for efficient set operations.
+For each keyword w, an empty bitmap Bw is initialized.
+These structures enable efficient multi-keyword query processing through fast bitmap-based pruning prior to cryptographic
+verification.
+Step 5: System State Synchronization. The CS retrieves the
+latest global state from the blockchain:
+(Rootrev , Vtag ),
+and stores it locally. This ensures that all subsequent operations, including search and revocation handling, are aligned
+with the current system epoch.
+Phase 2: User Registration: Phase 2 establishes a secure, privacy-preserving identity for each Mobile Data User
+(MDU) and binds their attribute set to a post-quantum latticebased secret key. The design ensures that only legitimate and
+non-revoked users can generate valid multi-keyword search
+trapdoors in subsequent phases.
+Step 1: Identity Registration and Blockchain Anchoring.
+The MDU submits identity credentials and a public identifier
+to the Identity Authority (IA) over a secure channel. Upon
+successful verification, the IA inserts the hashed identity into
+the Registration Tree:
+IdentityAdd(H(GID), T reereg ) → Rootnew
+reg .
+The IA signs the updated root using CRYSTALS-Dilithium:
+sig
+σIA ← Dilithium.Sign(SKIA
+, Rootnew
+reg ),
+
+and submits (Rootnew
+reg , σIA ) to the blockchain smart contract.
+After verification, the contract records the new root and
+updates the global system state.
+This establishes a publicly verifiable binding between the
+identity H(GID) and the current system epoch.
+Step 2: Attribute-Bound Key Generation (TEE-Assisted).
+To reduce computational overhead and improve practicality,
+the lattice-based key generation is performed within a trusted
+execution environment (TEE) managed by the Trusted Authority (TA):
+KeyGen(P K, M SK, S, GID) → SKGID,S .
+The TA embeds (S, GID) into a target lattice vector u and
+samples a short vector su such that:
+A · su = u (mod q).
+Step 3: Anonymous Authentication Provisioning. To enable privacy-preserving participation, the MDU is provisioned
+with authentication materials:
+
+Merkle Membership Path: The IA provides Ωreg corresponding to H(GID).
+• Revocation Reference: The MDU obtains the current
+Rootrev for non-revocation proof generation.
+• Ephemeral Signing Key: The MDU generates a temporary
+Dilithium key pair (P Ktemp , SKtemp ) for unlinkable
+request authentication.
+The MDU later constructs a zero-knowledge proof demonstrating: (i) membership in the Registration Tree, and (ii)
+non-membership in the Revocation Tree, without revealing its
+identity.
+•
+
+Step 4: Epoch Synchronization and Compact State Initialization. The MDU retrieves the latest system state:
+(Rootreg , Rootrev , Vtag ),
+and initializes its local state as:
+Suser = {SKGID,S , Ωreg , Rootreg , Rootrev , Vtag }.
+Only minimal authentication paths and roots are stored,
+avoiding full tree storage and reducing memory overhead on
+the mobile device.
+Step 5: Registration Completion. Upon completion, the
+MDU becomes epoch-synchronized and is fully equipped to:
+(i) generate valid multi-keyword trapdoors, (ii) produce zeroknowledge proofs of legitimacy, and (iii) securely interact with
+the Cloud Server.
+Phase 3: Data Encryption: Phase 3 enables the MDO to
+securely encrypt and upload data with minimal computational
+overhead, while ensuring post-quantum confidentiality, finegrained access control, and efficient multi-keyword searchability. The design follows a lightweight client paradigm,
+where only symmetric and hash operations are performed
+on the MDO, while lattice-based operations are amortized or
+offloaded to a trusted edge/TEE environment.
+Step 1: Lightweight Symmetric Encryption. The MDO
+generates a random session key:
+$
+
+K←
+− {0, 1}256 ,
+and encrypts the plaintext m using:
+(CTdata , τ ) ← ChaCha20-Poly1305(K, m).
+This step ensures confidentiality and integrity with constanttime computation suitable for mobile devices.
+Step 2: Policy-Bound Key Encapsulation. Given an access
+policy (M, ρ), the symmetric key is encapsulated using the
+lattice-based ABSE scheme:
+CTK ← EncABSE (P K, K, (M, ρ)).
+Execution Model: This step supports two execution modes:
+• Local Mode: The MDO performs encapsulation locally
+for lightweight policies.
+• Edge-Assisted Mode (Default): The MDO securely transmits (K, (M, ρ)) to a trusted edge server equipped with
+a Trusted Execution Environment (TEE):
+secure channel
+
+(K, (M, ρ)) −−−−−−−→ TEE.
+
+6
+
+Inside the enclave, the encapsulation is performed as:
+CTK ← EncABSE (P K, K, (M, ρ)).
+The resulting ciphertext CTK is returned to the MDO or
+forwarded to the Cloud Server.
+This hybrid design reduces computational overhead on mobile
+devices while ensuring that the symmetric key K remains
+protected within the trusted execution environment.
+Step 3: Secure Multi-Keyword Index Construction. To
+support efficient multi-keyword search while preserving practicality for mobile devices, the secure index is constructed in
+two layers.
+(i) Token Generation (MDO-Side): For each keyword w ∈ W ,
+the MDO computes
+
+designed to enable efficient and adaptive multi-keyword search
+over encrypted data.
+(i) Encrypted Keyword Mapping. Each encrypted keyword
+component cw ∈ IW is mapped to a file identifier f id, forming
+an encrypted inverted index:
+I : cw → {f id1 , f id2 , . . .}.
+(ii) Compressed Bitmap Construction. For each keyword
+w, the server maintains a compressed bitmap Bw ∈ {0, 1}N ,
+where each bit indicates the presence of w in a file. To reduce
+storage and improve intersection efficiency, Bw is encoded
+using a compressed bitmap representation (e.g., run-length or
+word-aligned compression):
+Bw = Compress(BitVector(w)).
+
+tw = H(w ∥ r),
+where r is a per-file random nonce.
+(ii) Lattice-Based Embedding (Edge/TEE-Side): The MDO
+securely transmits {tw }w∈W to the edge/TEE. Inside the
+enclave, a shared index seed sidx is sampled once per file,
+and each index component is generated as
+cw = Asidx + ew + tw (mod q),
+
+ew ← χ.
+
+The secure index is:
+IW = {cw | w ∈ W }.
+
+(iii) Frequency-Aware Metadata. The SOL maintains keyword statistics:
+fw = |Bw |,
+which represent keyword frequency. These statistics are used
+to dynamically reorder query evaluation (e.g., intersecting the
+smallest bitmap first), reducing intermediate candidate sizes.
+(iv) Incremental Update Mechanism. Upon insertion of a
+new ciphertext, the SOL updates only the affected bitmap
+entries:
+Bw [f id] ← 1,
+
+This design keeps the MDO lightweight, amortizes lattice cost
+across all keywords using a single shared seed, and produces
+an index structure compatible with bitmap-based pruning at
+the Cloud Server.
+
+without rebuilding the entire index. This supports efficient
+dynamic data updates in mobile cloud environments.
+
+Step 4: Forward-Private Randomization. To prevent keyword linkage across ciphertexts, the edge/TEE re-randomizes
+each index component:
+
+(v) Adaptive Candidate Generation Interface. The SOL
+exposes an interface for Phase 4 that supports adaptive query
+execution:
+\
+Ccand =
+Bw ,
+
+c′w = cw + Ar′ ,
+
+$
+
+r′ ←
+− Znq .
+
+The final index becomes:
+IW = {c′w | w ∈ W }.
+This ensures forward privacy, preventing the Cloud Server
+from linking identical keywords across different files.
+Step 5: Epoch Binding. The MDO retrieves the latest system
+state:
+(Rootrev , Vtag ),
+and binds the ciphertext to the current epoch, enabling lazy
+revocation.
+Step 6: Ciphertext Assembly and Upload. The final ciphertext is constructed as:
+C = {CTdata , CTK , τ, IW , (M, ρ), Vtag },
+and uploaded to the Cloud Server.
+Step 7: Server-Side Index Materialization. Upon receiving the ciphertext C, the Cloud Server updates the Search
+Optimization Layer (SOL), a multi-layer indexing structure
+
+w∈Q′
+
+where Q′ is reordered based on ascending fw . This minimizes
+intermediate intersection cost and improves pruning efficiency.
+The combination of compressed bitmap indexing,
+frequency-aware ordering, and incremental updates enables
+sub-linear multi-keyword search complexity. By performing
+early-stage pruning in the SOL, only a reduced candidate
+set is forwarded to expensive lattice-based verification,
+significantly improving overall system efficiency.
+Phase 4: Secure Multi-Keyword Search and Retrieval:
+Phase 4 enables privacy-preserving, efficient, and verifiable
+multi-keyword search over encrypted data. The proposed
+design introduces an adaptive, batch-enabled, and leakageaware search framework that significantly reduces computation and communication overhead while maintaining strong
+post-quantum security guarantees.
+Step 1: Batch Trapdoor Generation (MDU-Side). Given a
+multi-keyword query Q = {w1 , . . . , wk }, the MDU generates
+a compact trapdoor using a batch construction:
+TQ ← TrapGen(SKGID,S , Q).
+
+7
+
+Instead of producing independent trapdoors per keyword,
+the batch trapdoor encodes all query terms into a unified
+structure, reducing communication overhead and enabling
+joint evaluation at the server.
+Step 2: Anonymous Authentication and Request Formation. To ensure privacy, the MDU generates a zero-knowledge
+proof πGID demonstrating: (i) membership in the Registration
+Tree, and (ii) non-membership in the Revocation Tree.
+The request is signed using an ephemeral Dilithium key:
+σ ← Dilithium.Sign(SKtemp , TQ ∥ πGID ∥ Vtag ∥ T S).
+The final query request is:
+Q = (TQ , πGID , σ).
+Step 3: Request Verification (Cloud Server). Upon receiving
+Q, the Cloud Server performs:
+• Signature verification using P Ktemp ,
+• Zero-knowledge
+proof
+validation
+against
+(Rootreg , Rootrev ),
+• Epoch consistency check using Vtag .
+Only valid requests proceed to the search phase.
+Step 4: Adaptive Multi-Keyword Candidate Pruning. To
+optimize performance, the Cloud Server employs an adaptive
+search strategy. Let Bw denote the bitmap corresponding to
+keyword w. The candidate set is computed as:
+\
+Ccand =
+Bw .
+w∈Q
+
+Define a query complexity metric:
+C(Q) = |Q| · avg(|Bw |).
+The server selects the execution mode:
+(
+Direct Verification, C(Q) < τ,
+Mode(Q) =
+Bitmap Pruning,
+otherwise.
+This adaptive mechanism dynamically selects the most efficient search strategy based on query characteristics, reducing
+unnecessary computations.
+Step 5: Lattice-Based Matching and Verification. For each
+candidate ciphertext Ci , the Cloud Server evaluates:
+i
+Match(IW
+, TQ ) → {0, 1},
+i
+where IW
+is the secure index of file i.
+Only matching ciphertexts are retained:
+
+while keyword contents remain computationally hidden.
+Step 7: Ciphertext Retrieval and Decryption (MDU). The
+Cloud Server returns R to the MDU. For each ciphertext:
+• Verify policy satisfaction (M, ρ),
+• Decrypt CTK using SKGID,S to recover K,
+• Decrypt CTdata using K.
+This completes secure multi-keyword search and retrieval.
+Phase 5: User Revocation and Epoch Transition
+Phase 5 defines a search-coupled, epoch-driven revocation
+mechanism that avoids immediate global ciphertext updates.
+Instead of re-encrypting all outsourced data after every revocation event, the system advances a global cryptographic epoch
+and performs candidate-selective just-in-time re-encryption
+only for ciphertexts that are actually involved in subsequent
+search requests. This design substantially reduces revocation
+overhead while preserving forward security and revocation
+soundness.
+Step 1: Identity Revocation and Merkle Tree Update. When
+an MDU is revoked, the Trusted Authority (TA) issues a signed
+revocation command containing the user identifier H(GID).
+Upon verifying the request, the Identity Authority (IA) updates
+the Revocation Tree:
+Revoke(H(GID), T reerev ) → Rootnew
+rev .
+This operation replaces the corresponding leaf value from the
+active placeholder state to H(GID), thereby invalidating the
+user’s previously issued revocation witness and breaking future
+non-revocation proofs.
+Step 2: Blockchain Anchoring and Epoch Advancement.
+To establish a globally verifiable revocation state, the IA signs
+the updated root using CRYSTALS-Dilithium:
+σIA ← Dilithium.Sign(SKIA , Rootnew
+rev ),
+and submits (Rootnew
+rev , σIA ) to the blockchain smart contract.
+After verification, the smart contract:
+• records the revocation event,
+new
+• updates the on-chain revocation root to Rootrev ,
+• advances the system epoch from k to k + 1.
+The new global version tag is then defined as:
+new
+Vtag
+= (k + 1, Rootnew
+rev ).
+
+Step 3: Epoch-Bound Transition Key Generation. Following epoch advancement, the TA generates a re-encryption key
+that bridges the old and new epochs:
+
+i
+R = {Ci | Match(IW
+, TQ ) = 1}.
+
+old
+new
+RK ← GenRK(M SK, Vtag
+, Vtag
+).
+
+Step 6: Leakage-Aware Query Processing. To mitigate
+search pattern leakage, the framework applies:
+• Query Padding: augment Q with dummy keywords,
+• Result Shuffling: randomize output order,
+• Batch Retrieval: return results in fixed-size groups.
+The leakage function is bounded as:
+
+In parallel, valid users update their query state so that future
+trapdoors become epoch-bound:
+
+L = (access pattern, query size),
+
+new
+new
+TQnew ← TrapGen(SKGID,S
+, Q, Vtag
+).
+
+Novelty: By binding both ciphertext evolution and trapdoor
+generation to the same version tag, revoked users holding
+stale keys or stale trapdoor states cannot generate valid search
+requests under the new epoch.
+
+8
+
+Step 4: Cloud-Side Lazy Re-Encryption Provisioning. The
+new
+TA securely transmits (RK, Vtag
+) to the Cloud Server. Upon
+receipt, the Cloud Server:
+new
+updates its local epoch state to Vtag
+,
+• stores RK in a secure re-encryption buffer,
+• marks legacy ciphertexts as epoch-stale without immediately transforming them.
+•
+
+This avoids costly system-wide re-encryption at revocation
+time.
+Step 5: Candidate-Selective Just-In-Time Re-Encryption.
+During Phase 4, once the Cloud Server computes the search
+candidate set
+Ccand = {Ci },
+it checks the version tag associated with each candidate
+ciphertext. For any ciphertext Ci such that
+new
+Vtag (Ci ) ̸= Vtag
+,
+
+A. Security Model
+We consider a probabilistic polynomial-time (PPT) adversary A interacting with the system under the following
+capabilities:
+Cloud Server Adversary: Honest-but-curious, capable
+of observing ciphertexts, indexes, and query patterns.
+• External Adversary: Can intercept communication and
+submit adaptive queries.
+• Revoked User: Holds previously valid keys and attempts
+to access updated data.
+•
+
+The adversary is allowed to issue the following oracle
+queries:
+OEnc (m, W, (M, ρ)): returns ciphertext C.
+OT rap (Q): returns trapdoor TQ .
+• OKey (S): returns secret key for attribute set S.
+• ORev (GID): triggers revocation.
+•
+•
+
+The leakage function is defined as:
+
+the server performs:
+Ci′ ← ReEnc(RK, Ci ),
+and updates its local version metadata accordingly.
+Unlike conventional epoch-based revocation schemes that
+update all ciphertexts eagerly, the proposed design re-encrypts
+only those ciphertexts that are both:
+relevant to the current query, and
+• stale with respect to the current epoch.
+•
+
+Thus, the re-encryption process is tightly coupled with query
+execution, avoiding unnecessary transformations over dormant
+or irrelevant data.
+Step 6: Security Effect. The proposed revocation mechanism
+achieves three security properties:
+Revocation Soundness: A revoked user cannot produce
+valid non-revocation proofs or epoch-consistent trapdoors
+after epoch advancement.
+• Forward Security: Ciphertexts transformed to the new
+epoch cannot be accessed using stale keys or stale search
+tokens.
+• Freshness-Coupled Access Control: Successful search
+and decryption require consistency among the current
+revocation root, the active epoch tag, and the transformed
+ciphertext state.
+
+L = (access pattern, |Q|, |Ccand |),
+while keyword contents and plaintext remain hidden.
+
+B. Confidentiality (IND-CPA)
+Theorem 1 (IND-CPA Security). The proposed scheme
+achieves indistinguishability under chosen-plaintext attacks.
+Proof. We define a sequence of hybrid games.
+Game 0: Real execution.
+Game 1: Replace the symmetric encryption (ChaCha20Poly1305) with a random string. The difference is bounded
+by the AEAD security:
+| Pr[G1 ] − Pr[G0 ]| ≤ AdvAEAD .
+
+•
+
+Therefore, revocation is enforced not only at the identityverification layer but also at the searchable-encryption layer,
+providing a tighter and more scalable access control mechanism.
+
+Game 2: Replace the encapsulated key CTK with a random
+value. The difference is bounded by the IND-CPA security of
+the lattice-based ABSE under the MLWE assumption:
+| Pr[G2 ] − Pr[G1 ]| ≤ AdvM LW E .
+Game 3: Replace index components with random vectors.
+Due to LWE hardness:
+cw = As + e + tw ≈ U (Zq ),
+thus:
+| Pr[G3 ] − Pr[G2 ]| ≤ AdvLW E .
+
+IV. S ECURITY A NALYSIS
+This section formally analyzes the security of the proposed
+PQABSE-SRM framework. We adopt a game-based security
+model to rigorously prove confidentiality, search privacy, and
+revocation soundness under standard post-quantum assumptions.
+
+In Game 3, the adversary’s view is independent of the
+plaintext. Therefore:
+D−CP A
+AdvIN
+≤ AdvAEAD + AdvM LW E + AdvLW E .
+A
+
+□
+
+9
+
+C. Search Privacy (IND-CKA)
+Theorem 2 (Adaptive IND-CKA Security). Under the hardness of the LWE/MLWE problems and the EUF-CMA security of the signature scheme, the proposed scheme achieves
+adaptive indistinguishability against chosen keyword attacks
+(IND-CKA) with respect to the leakage function
+L = (access pattern, |Q|, |Ccand |).
+That is, for any probabilistic polynomial-time adversary A,
+there exists a simulator S such that
+|Pr[RealA = 1] − Pr[SimA = 1]| ≤ negl(λ).
+Proof. We prove the theorem using a sequence of hybrid
+games transitioning from the real execution to a simulated
+view constructed using only leakage L.
+Real Game G0 . This corresponds to the real system execution. The adversary A interacts with the system and observes:
+• ciphertexts C = {CTdata , CTK , IW , Vtag },
+• trapdoors TQ ,
+• search results R and candidate sets Ccand .
+The adversary’s view is denoted as Viewreal .
+Hybrid G1 (Trapdoor Replacement). In this game, each
+trapdoor TQ generated by TrapGen is replaced with a uniformly random value of the same length that preserves only
+the query size |Q|.
+Since trapdoors are generated using secret keys bound to
+the user’s attributes and include randomness, distinguishing
+real trapdoors from random ones implies breaking the pseudorandomness of the trapdoor generation mechanism or deriving
+information about the secret key. Under the security of the
+underlying lattice construction, we have:
+| Pr[G1 ] − Pr[G0 ]| ≤ negl(λ).
+Hybrid G2 (Index Randomization). In this game, each index
+component is replaced with a simulated LWE sample:
+c′w ← U (Zm
+q ).
+From the index construction:
+
+Indistinguishability Argument. Combining the hybrid transitions:
+
+| Pr[G0 ]−Pr[G3 ]| ≤ | Pr[G0 ]−Pr[G1 ]|+| Pr[G1 ]−Pr[G2 ]|+| Pr[G2 ]−Pr[G
+Substituting bounds:
+≤ negl(λ) + AdvLW E (λ) + 0.
+Thus:
+|Pr[RealA = 1] − Pr[SimA = 1]| ≤ negl(λ).
+Conclusion. Since the adversary’s view can be simulated
+using only leakage L, the scheme achieves adaptive IND-CKA
+security.
+D. Forward Privacy
+Theorem 3 (Forward Privacy). Let w be any keyword and let
+C1 , C2 , . . . be ciphertexts generated at different upload times.
+Under the hardness of the LWE problem, the Cloud Server or
+any probabilistic polynomial-time adversary cannot determine,
+except with negligible probability in the security parameter
+λ, whether two encrypted index components from different
+ciphertexts correspond to the same underlying keyword beyond
+the permitted leakage.
+Proof. We prove the theorem by showing that the distribution
+of the re-randomized index component for a keyword is
+computationally unlinkable across ciphertexts.
+1) Base index generation. For a keyword w, the secure index
+component is first generated as
+cw = Asidx + ew + tw
+
+c′w = As⋆ + e + tw ,
+which is computationally indistinguishable from uniform under the LWE assumption. Therefore:
+| Pr[G2 ] − Pr[G1 ]| ≤ Adv
+
+Simulator Construction. We now construct a simulator S
+that, given only L, produces a simulated view:
+• generate random ciphertext components consistent with
+sizes,
+• generate random trapdoors consistent with |Q|,
+• simulate candidate sets and access patterns using L.
+The resulting simulated view Viewsim is identical to
+ViewG3 .
+
+LW E
+
+(λ).
+
+Hybrid G3 (Search Simulation). In this game, the server
+no longer performs real bitmap intersection or lattice-based
+matching. Instead, the candidate set Ccand and result set R
+are generated using only leakage L:
+• The size of Ccand is preserved,
+• The access pattern (which ciphertexts are returned) is
+simulated,
+• No keyword-dependent computation is performed.
+Since the adversary is allowed to learn L, this transformation does not change the observable distribution:
+| Pr[G3 ] − Pr[G2 ]| = 0.
+
+(mod q),
+
+where sidx is the shared index seed, ew ← χ is sampled from
+the error distribution, and
+tw = H(w ∥ r)
+is the keyword token derived using a per-file random nonce r.
+Since a fresh nonce r is chosen independently for each file,
+even if the same keyword w appears in multiple ciphertexts,
+the corresponding token values
+t(1)
+w = H(w ∥ r1 ),
+
+t(2)
+w = H(w ∥ r2 )
+
+are computationally independent unless the adversary can
+break the collision resistance or pseudorandomness of the
+hash-based tokenization process.
+2) Re-randomization step. To further hide any structural relation across uploads, each index component is re-randomized
+as
+c′w = cw + Ar′ (mod q),
+
+10
+
+$
+
+where r′ ←
+− Znq is freshly sampled for each ciphertext.
+Substituting the definition of cw , we obtain
+c′w = A(sidx + r′ ) + ew + tw
+
+(mod q).
+
+Let
+s⋆w = sidx + r′ .
+Then
+c′w = As⋆w + ew + tw
+
+(mod q).
+
+Because r′ is freshly and independently sampled for every
+ciphertext, the effective seed s⋆w is also fresh and independent
+across uploads. Therefore, two occurrences of the same keyword in two different ciphertexts yield index components of
+the form
+⋆
+(1)
+c′(1)
+w = As1 + e1 + tw
+
+(mod q),
+
+⋆
+(2)
+c′(2)
+w = As2 + e2 + tw
+
+(mod q),
+
+with independently distributed randomness in both the linear
+term and the token term.
+3) Adversarial distinguishing game. Consider an adversary
+A given two re-randomized index components
+x0 , x1 ,
+generated either:
+• from the same keyword w embedded in two different
+ciphertexts, or
+• from two different keywords w0 ̸= w1 .
+The adversary’s goal is to distinguish these two cases with
+non-negligible advantage.
+Suppose, toward contradiction, that A can distinguish them
+with non-negligible probability. Then A must be exploiting
+′(2)
+′(1)
+some residual linkage in the distributions of cw and cw .
+However, any such linkage would require distinguishing
+As⋆ + e + t
+from an independent random LWE sample across uploads.
+This contradicts the hardness of the LWE problem, since
+the pair (A, As⋆ + e) is computationally indistinguishable
+from uniform, and the token term tw = H(w ∥ r) is
+independently randomized per file due to fresh nonce selection.
+Hence, the adversary cannot reliably test whether two observed
+components correspond to the same underlying keyword.
+4) Why fresh nonce and re-randomization are both needed.
+The fresh nonce r ensures that keyword tokens do not remain
+deterministic across different files. The re-randomization term
+Ar′ additionally refreshes the lattice component even when the
+same system parameters and embedding process are reused.
+Thus, the final index component does not preserve a stable
+identifier for any keyword across ciphertexts.
+5) Leakage boundary. The theorem does not claim that
+all leakage is eliminated. In particular, the server may still
+observe permitted leakage such as ciphertext access patterns
+or candidate-set sizes during search. However, such leakage
+does not reveal a direct reusable linkage between identical
+keywords across different ciphertext uploads.
+
+6) Conclusion. Since each encrypted keyword component is
+generated using fresh token randomness and fresh lattice rerandomization, two occurrences of the same keyword across
+different ciphertexts are computationally unlinkable. Therefore, under the LWE assumption, the scheme satisfies forward
+privacy.
+E. Revocation Soundness
+Theorem 4 (Revocation Soundness). Let u⋆ be a user revoked
+at epoch k + 1. After the revocation event is anchored on the
+blockchain and the system transitions from
+old
+Vtag
+= (k, Rootold
+rev )
+
+to
+
+new
+Vtag
+= (k + 1, Rootnew
+rev ),
+
+the revoked user u⋆ cannot, except with negligible probability
+in the security parameter λ, (i) produce a valid search request
+accepted by the Cloud Server, or (ii) decrypt any ciphertext
+that has been updated to the new epoch.
+Proof. We prove the theorem by showing that a revoked user
+must simultaneously break at least one of three independently
+enforced protection layers: (1) non-revocation authentication,
+(2) epoch-bound trapdoor validity, and (3) epoch-consistent
+ciphertext decryption.
+1) Revocation updates the global authentication state.
+When user u⋆ is revoked, the Identity Authority updates the
+revocation tree:
+Revoke(H(GID⋆ ), T reerev ) → Rootnew
+rev ,
+where the leaf corresponding to u⋆ is changed from the active
+placeholder state to the revoked value H(GID⋆ ). The updated
+root is signed and anchored on-chain, and the smart contract
+advances the system epoch to
+new
+Vtag
+= (k + 1, Rootnew
+rev ).
+
+Hence, after revocation, the public system state used by all
+verifiers is no longer (k, Rootold
+rev ), but the new state (k +
+1, Rootnew
+rev ).
+2) The revoked user cannot produce a valid non-revocation
+proof. A valid search request in Phase 4 requires a zeroknowledge proof πGID attesting that the requester is:
+1) a member of the registration tree, and
+2) not a member of the revocation set encoded by Rootnew
+rev .
+Before revocation, user u⋆ may possess an old witness or
+authentication path relative to Rootold
+rev . However, once the
+tree is updated, that witness is no longer consistent with the
+current revocation root. Therefore, to pass verification against
+Rootnew
+rev , the revoked user must either:
+• produce a valid non-revocation proof for a false statement, or
+• forge a proof that verifies against the new root without a
+consistent witness.
+Both are impossible except with negligible probability,
+assuming the soundness of the zero-knowledge proof system
+and the collision resistance of the hash function underlying
+the Merkle tree. Thus, the revoked user cannot satisfy the
+authentication predicate required by the Cloud Server.
+
+11
+
+3) The revoked user cannot generate an epoch-consistent
+trapdoor. Even if the adversary replays previously issued
+search material, a valid search request must also contain
+a trapdoor consistent with the new epoch. In the proposed
+framework, trapdoor generation is version-bound:
+
+Thus, old ciphertexts are not exploitable merely because
+they have not yet been transformed. Once a legitimate query
+touches such ciphertexts, they are immediately upgraded to the
+new epoch, after which stale keys become cryptographically
+useless.
+
+new
+new
+TQnew ← TrapGen(SKGID,S
+, Q, Vtag
+).
+
+6) Conclusion. To successfully access the system after revocation, the adversary must simultaneously bypass the authentication layer, generate epoch-consistent trapdoors, and
+decrypt ciphertexts transformed to the new epoch. Each of
+these requires breaking either the soundness of the ZKP
+system, the integrity of the Merkle-root-based revocation state,
+or the security of the underlying lattice-based cryptographic
+mechanisms. Therefore, the probability that a revoked user can
+generate a valid search query or decrypt updated ciphertexts
+is negligible in λ.
+Hence, the proposed framework satisfies revocation soundness.
+
+After epoch transition, only non-revoked users receive valid
+new
+update material and derive keys synchronized with Vtag
+. The
+⋆
+revoked user u retains only stale credentials associated with
+old
+Vtag
+. Therefore, any trapdoor produced by u⋆ is bound to the
+old epoch and fails the server-side consistency check against
+new
+Vtag
+.
+To generate a valid new-epoch trapdoor, the revoked user
+would have to:
+• derive the updated secret key without authorization, or
+• forge a trapdoor that is computationally indistinguishable
+from one produced by TrapGen under the new epoch.
+The first event contradicts the correctness of the key update
+policy, while the second contradicts the hardness assumptions
+of the underlying lattice-based construction. Hence, stale users
+cannot issue valid search tokens after revocation.
+4) The revoked user cannot decrypt updated ciphertexts.
+Suppose the revoked user somehow obtains a ciphertext returned during a later query. During Phase 5 and subsequent
+Phase 4 executions, stale ciphertexts are transformed to the
+new epoch using the re-encryption key:
+C ′ ← ReEnc(RK, C).
+The transformed ciphertext C ′ is consistent only with the
+new
+new version tag Vtag
+. Decryption requires a secret key
+synchronized to the same epoch, namely a key updated for
+non-revoked users. Since u⋆ does not receive the valid update
+token or updated secret material after revocation, the user
+only holds stale keying material. Consequently, the decryption
+reconstruction for C ′ fails.
+Equivalently, for the revoked user to decrypt C ′ , one of the
+following must occur:
+• the user derives the updated key without receiving the
+authorized update material,
+• the re-encryption transformation fails to separate oldepoch and new-epoch access states, or
+• the user breaks the semantic security of the lattice-based
+encapsulation.
+All three events occur only with negligible probability under
+the correctness of the update mechanism and the security of
+the underlying post-quantum encryption scheme.
+5) Candidate-selective just-in-time re-encryption does
+not weaken soundness. The proposed system performs reencryption lazily, i.e., only when a ciphertext is accessed
+and found to be stale. This optimization does not weaken
+revocation soundness. For any ciphertext that remains in the
+old epoch, a revoked user still cannot access it because
+successful access already requires:
+new
+• a valid non-revocation proof against Rootrev , and
+new
+• a valid epoch-consistent trapdoor under Vtag .
+
+F. Integrity and Authenticity
+Theorem 5 (Integrity and Authenticity). The proposed framework guarantees the authenticity and integrity of both (i) usergenerated search requests and (ii) global system states maintained during registration, revocation, and epoch transition.
+Specifically, except with negligible probability in the security
+parameter λ, no probabilistic polynomial-time adversary can
+forge a valid request accepted by the Cloud Server or modify
+the authenticated system state without detection.
+Proof. We prove the theorem by considering the two protected
+objects in the system: search requests and global state transitions.
+1) Authenticity and integrity of search requests. A valid
+search request submitted by an MDU contains, at minimum,
+the batch trapdoor TQ , the zero-knowledge proof πGID , the
+current version tag Vtag , a timestamp T S, and a signature
+σ ← Dilithium.Sign(SKtemp , TQ ∥ πGID ∥ Vtag ∥ T S).
+Upon receiving the request, the Cloud Server verifies σ
+using the corresponding public key P Ktemp . Therefore, for
+an adversary to submit a forged request that is accepted by
+the server, one of the following must occur:
+1) the adversary forges a valid CRYSTALS-Dilithium signature on a new message not previously signed;
+2) the adversary modifies one or more request fields (e.g.,
+TQ , πGID , Vtag , or T S) while preserving signature
+validity;
+3) the adversary replays an old signed request and still
+passes freshness and epoch-consistency verification.
+Case (1) contradicts the EUF-CMA security of CRYSTALSDilithium. Case (2) is also impossible under EUF-CMA security because the signature binds the entire request tuple; any
+modification changes the signed message and causes verification failure. Case (3) is prevented by the timestamp and version
+checks performed by the Cloud Server. A replayed request
+with stale T S fails freshness verification, while a request
+bound to an obsolete epoch fails the version-consistency test
+against the current blockchain state.
+
+12
+
+Hence, except with negligible probability, an adversary
+cannot forge or tamper with a valid search request.
+2) Integrity and authenticity of global system state. The
+global system state consists of authenticated values such as
+the registration root Rootreg , revocation root Rootrev , and the
+associated epoch or version tag Vtag . These values are updated
+only through authorized transactions issued by the Identity
+Authority (IA) or Trusted Authority (TA), and each update is
+signed before submission to the blockchain. For example, an
+updated revocation root is submitted as
+σIA ← Dilithium.Sign(SKIA , Rootnew
+rev ),
+followed by publication of (Rootnew
+rev , σIA ) to the smart contract.
+For an adversary to alter the global state without detection,
+at least one of the following must occur:
+1) the adversary forges a valid Dilithium signature on a
+fraudulent state update;
+2) the adversary modifies an already signed root value while
+preserving verification validity;
+3) the adversary alters or removes an already committed
+blockchain record.
+The first two events again contradict the EUF-CMA security
+of CRYSTALS-Dilithium, since every valid state transition is
+explicitly signed by an authorized entity and bound to the
+exact state value being updated. The third event contradicts the
+immutability and append-only consistency of the blockchain
+ledger. Once a state update is recorded on-chain and confirmed
+by the smart contract, it becomes publicly verifiable and
+computationally infeasible to modify without detection.
+Therefore, the integrity of Rootreg , Rootrev , and the associated epoch state is preserved.
+3) Combined system guarantee. Because all user requests are
+authenticated by CRYSTALS-Dilithium signatures and all critical system states are both signature-protected and blockchain
+anchored, any successful undetected tampering would imply
+either:
+• breaking the EUF-CMA security of CRYSTALSDilithium, or
+• violating the integrity/immutability guarantees of the
+blockchain.
+Under these assumptions, both events occur only with
+negligible probability in λ. Hence, the framework guarantees
+authenticity and integrity of queries and system state.
+
+R EFERENCES
+[1] S. Niu, Y. Hu, S. Zhou, H. Shao and C. Wang, “Attribute-Based
+Searchable Encryption in Edge Computing for Lightweight Devices,”
+IEEE Systems Journal, vol. 17, no. 3, pp. 3503-3514, 2023.
+[2] Cheng, Song, Chen, Jiansheng, Li, Jianyang, Yao, Kan, Gao, Shunxian,
+Rui, Kangkang, Cui, Yijun, “Optimized Design and Implementation of
+CRYSTALS-KYBER Based on MLWE,” Security and Communication
+Networks, 2025, 7884158, 15 pages, 2025.
+[3] H. Yu and X. Bai, “Identity-Based Searchable Attribute Signcryption
+in Lattice for a Blockchain-Based Medical System,” in Frontiers of
+Information Technology & Electronic Engineering, vol. 25, no. 3, pp.
+461-471, 2024.
+
+[4] Varri, U.S., Pasupuleti, S.K. & Kadambari, K.V. CP-ABSEL: Ciphertextpolicy attribute-based searchable encryption from lattice in cloud storage. Peer-to-Peer Netw. Appl. 14, 1290–1302 (2021).
+[5] Karimani, Saba, and Taraneh Eghlidos. 2025. “Verifiable MultiAuthority Attribute-Based Encryption with Keyword Search Based on
+MLWE” Cryptography 9, no. 4: 76.
+[6] Dahlberg, R., Pulls, T., Peeters, R. (2016). Efficient Sparse Merkle Trees.
+In: Brumley, B., Röning, J. (eds) Secure IT Systems. NordSec 2016.
+Lecture Notes in Computer Science(), vol 10014. Springer, Cham.
+[7] Dushku, E., Giannetsos, T., Dragoni, N. (2025). Direct Anonymous
+Attestation. In: Jajodia, S., Samarati, P., Yung, M. (eds) Encyclopedia
+of Cryptography, Security and Privacy. Springer, Cham
+[8] Lyubashevsky, V. (2009). Fiat-Shamir with Aborts: Applications to
+Lattice and Factoring-Based Signatures. In: Matsui, M. (eds) Advances
+in Cryptology – ASIACRYPT 2009. ASIACRYPT 2009. Lecture Notes
+in Computer Science, vol 5912. Springer, Berlin, Heidelberg.
+[9] Giuseppe Ateniese, Kevin Fu, Matthew Green, and Susan Hohenberger.
+2006. Improved proxy re-encryption schemes with applications to secure
+distributed storage. ACM Trans. Inf. Syst. Secur. 9, 1 (February 2006),
+1–30.
+[10] Hohenberger, S., Waters, B. (2014). Online/Offline Attribute-Based Encryption. In: Krawczyk, H. (eds) Public-Key Cryptography – PKC 2014.
+PKC 2014. Lecture Notes in Computer Science, vol 8383. Springer,
+Berlin, Heidelberg.
+[11] National Institute of Standards and Technology (NIST), “ModuleLattice-Based Key-Encapsulation Mechanism Standard,” Federal Information Processing Standards (FIPS) Publication 203, Washington, D.C.,
+Aug. 2024.
+[12] National Institute of Standards and Technology (NIST), “ModuleLattice-Based Digital Signature Standard,” Federal Information Processing Standards (FIPS) Publication 204, Washington, D.C., Aug. 2024.
+[13] M. Mahdavi, M. H. Tadayon, M. S. Haghighi, and Z. Ahmadian,
+“IoT-friendly, pre-computed and outsourced attribute based encryption,”
+Future Generation Computer Systems, vol. 150, pp. 115-126, 2024.
+[14] Chambi, Samy & Lemire, Daniel & Kaser, Owen & Godin, Robert.
+(2014). Better bitmap performance with Roaring bitmaps. Software:
+Practice and Experience. 46. 10.1002/spe.2325.
+[15] L. Liu, S. Wang, B. He and D. Zhang, ”A Keyword-Searchable ABE
+Scheme From Lattice in Cloud Storage Environment,” in IEEE Access,
+vol. 7, pp. 109038-109053, 2019, doi: 10.1109/ACCESS.2019.2928455.
+[16] S. Zhao, R. Jiang and B. Bhargava, ”RL-ABE: A Revocable Lattice
+Attribute Based Encryption Scheme Based on R-LWE Problem in Cloud
+Storage,” in IEEE Transactions on Services Computing, vol. 15, no. 2,
+pp. 1026-1035, 1 March-April 2022, doi: 10.1109/TSC.2020.2973256.
+[17] M. -J. O. Saarinen, ”Mobile Energy Requirements of the Upcoming
+NIST Post-Quantum Cryptography Standards,” 2020 8th IEEE International Conference on Mobile Cloud Computing, Services, and Engineering (MobileCloud), Oxford, UK, 2020, pp. 23-30, doi: 10.1109/MobileCloud48802.2020.00012.
+[18] J. Chang et al., ”SPLWAH: A bitmap index compression scheme for
+searching in archival Internet traffic,” 2015 IEEE International Conference on Communications (ICC), London, UK, 2015, pp. 7089-7094, doi:
+10.1109/ICC.2015.7249457.
+[19] Jinguk Jeong and Jongho Nang, ”An efficient bitmap indexing method
+for similarity search in high dimensional multimedia databases,” 2004
+IEEE International Conference on Multimedia and Expo (ICME) (IEEE
+Cat. No.04TH8763), Taipei, Taiwan, 2004, pp. 815-818 Vol.2, doi:
+10.1109/ICME.2004.1394325.
+[20] Yingying Hou, Wenbin Yao, Mingqing Wang,Lattice-Based MultiKeyword Searchable Encryption with Fine-Grained Access Control
+for Cloud Storage,Computer Networks,2026,112251,ISSN 1389-1286,
+https://doi.org/10.1016/j.comnet.2026.112251.
+[21] Y. Hou, W. Yao, X. Li, Y. Xia and M. Wang, ”Lattice-Based SemanticAware Searchable Encryption for Internet of Things,” in IEEE Internet
+of Things Journal, vol. 11, no. 17, pp. 28370-28384, 1 Sept.1, 2024,
+doi: 10.1109/JIOT.2024.3400816.
+[22] Zhou YH, Tang B, Yang YG. A lattice-based searchable encryption
+scheme with multi-user authorization for the certificateless cloud computing environment. Trans Emerging Tel Tech. 2024;35(4):e4960. doi:
+10.1002/ett.4960
+[23] SK Hafizul Islam, Nimish Mishra, Souvik Biswas, Bharat Keswani,
+Sherali Zeadally,An efficient and forward-secure lattice-based
+searchable encryption scheme for the Big-data era,Computers and
+Electrical Engineering,Volume 96, Part A,2021,107533,ISSN 00457906,https://doi.org/10.1016/j.compeleceng.2021.107533.
+[24] Zi-Yuan Liu, Yi-Fan Tseng, Raylin Tso, Masahiro Mambo, and YuChi Chen. 2022. Public-key Authenticated Encryption with Keyword
+
+13
+
+Search: Cryptanalysis, Enhanced Security, and Quantum-resistant Instantiation. In Proceedings of the 2022 ACM on Asia Conference
+on Computer and Communications Security (ASIA CCS ’22). Association for Computing Machinery, New York, NY, USA, 423–436.
+https://doi.org/10.1145/3488932.3497760
+[25] Bin Tang, Yi-Hua Zhou, Yu-Guang Yang, Bei Gong, and Zhenhu
+Ning. 2025. A lattice-based multi-authority updatable searchable encryption scheme for serverless architecture with scalable on-demand
+result processing. Comput. Stand. Interfaces 93, C (Apr 2025).
+https://doi.org/10.1016/j.csi.2024.103956
+[26] V. Yousefipoor and T. Eghlidos, ”An Efficient Post-Quantum AttributeBased Encryption Scheme Based on Rank Metric Codes for Cloud
+Computing,” in IEEE Access, vol. 11, pp. 99990-100000, 2023, doi:
+10.1109/ACCESS.2023.3313098.
+[27] C. Thingom et al., ”Secure and Privacy-Preserving Post-Quantum
+Attribute-Based Searchable Encryption for Edge-Driven Transportation
+Systems,” in IEEE Transactions on Consumer Electronics, vol. 72, no.
+1, pp. 1865-1875, Feb. 2026, doi: 10.1109/TCE.2025.3632071.
+[28] H. Lu, Y. Zhu, C. E. Chen, R. Feng, L. Zhang and D. Ma, ”Efficient Key
+Generation on Lattice Cryptography for Privacy Protection in Mobile
+IoT Crowdsourcing,” in IEEE Internet of Things Journal, vol. 11, no. 2,
+pp. 1893-1909, 15 Jan.15, 2024, doi: 10.1109/JIOT.2023.3328719.
+[29] H. Wang, Y. Liao, Z. Zhang, Y. Dong and S. Zhou, ”Lattice-Based
+Revocable IBEET Scheme for Mobile Cloud Computing,” in IEEE
+Transactions on Cloud Computing, vol. 13, no. 3, pp. 807-820, JulySept. 2025, doi: 10.1109/TCC.2025.3570332.
+[30] Z. Wang, Y. Fu and X. Lin, ”An Efficient and Revocable Attribute-Based
+Encryption Scheme Based on RLWE with Hidden Policy for 6G-Enabled
+IIoT,” 2025 IEEE International Conference on High Performance Computing and Communications (HPCC), Exeter, United Kingdom, 2025,
+pp. 794-799, doi: 10.1109/HPCC67675.2025.00119.
+
+

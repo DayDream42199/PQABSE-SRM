@@ -1,0 +1,16 @@
+{
+  "type": "module",
+  "scripts": {
+    "zk:build": "node zk/scripts/build_zk_assets.mjs",
+    "zk:demo": "node zk/scripts/demo_flow.mjs",
+    "zk:test": "node zk/scripts/test_cases.mjs",
+    "zk:roots": "node zk/scripts/compute_cpp_roots.mjs",
+    "zk:bridge-proof": "node zk/scripts/generate_cpp_auth_bundle.mjs"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7",
+    "ffjavascript": "^0.3.1",
+    "snarkjs": "^0.7.6"
+  }
+}

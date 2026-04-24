@@ -1,0 +1,17 @@
+build/
+build-wsl/
+runtime/
+node_modules/
+zk/build/
+*.o
+*.a
+*.so
+*.swp
+*.log
+core
+core.*
+*.pdf
+ReferenceTestPaper*.txt
+*:Zone.Identifier
+config/*smoke.conf
+config/*synthetic*.conf

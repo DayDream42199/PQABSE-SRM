@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.10)
+project(PQABSE_RLWE)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_library(OPENFHE_CORE_LIB OPENFHEcore HINTS /usr/local/lib)
+find_library(CRYPTO_LIB crypto)
+
+include_directories(include)
+include_directories(/usr/local/include/openfhe/core)
+include_directories(/usr/local/include/openfhe)
+
+add_executable(phase1_setup src/phase1_main.cpp src/phase1_setup.cpp)
+target_link_libraries(phase1_setup ${OPENFHE_CORE_LIB})
+
+add_executable(phase1_verify src/phase1_verify.cpp src/phase1_setup.cpp)
+target_link_libraries(phase1_verify ${OPENFHE_CORE_LIB})
+
+add_executable(phase2_keygen src/phase2_main.cpp src/phase2_keygen.cpp src/phase1_setup.cpp)
+target_link_libraries(phase2_keygen ${OPENFHE_CORE_LIB} ${CRYPTO_LIB})
+
+add_executable(phase3_encrypt src/phase3_main.cpp src/phase3_encrypt.cpp src/phase1_setup.cpp)
+target_link_libraries(phase3_encrypt ${OPENFHE_CORE_LIB} ${CRYPTO_LIB})
+
+add_executable(phase4_search src/phase4_main.cpp src/phase4_search.cpp src/phase2_keygen.cpp src/phase3_encrypt.cpp src/phase1_setup.cpp)
+target_link_libraries(phase4_search ${OPENFHE_CORE_LIB} ${CRYPTO_LIB})
