@@ -1,32 +1,27 @@
 # TA+IA+Blockchain
 
-Deploy this folder to the TA EC2 instance.
-
-Main commands:
+Build:
 
 ```bash
-./ta_ia_blockchain.sh setup
-./ta_ia_blockchain.sh register Alice
-./ta_ia_blockchain.sh register Bob
-./ta_ia_blockchain.sh serve
-./ta_ia_blockchain.sh submit-revoke revoke_alice live_revoke_1
+cd app
+npm ci
+cmake -S . -B build-wsl
+cmake --build build-wsl -j
 ```
 
-Environment:
+Run the HTTP service:
 
 ```bash
-export PQ_ABSE_BUS_DIR=/mnt/pq_abse_bus
-export PQ_ABSE_TA_EXPORT_DIR=/mnt/pq_abse_exports
+cd ..
+bash ./ta_ia_blockchain.sh serve-http 0.0.0.0 8081
 ```
 
-This is the parent control plane for:
+Manual admin commands:
 
-- setup
-- keygen
-- revocation
-- blockchain state
-- export of shared state and refresh material
-
-Planned real TEE upgrade:
-
-- replace the software TEE-backed keygen path with a Nitro Enclave service
+```bash
+bash ./ta_ia_blockchain.sh setup
+bash ./ta_ia_blockchain.sh register Alice
+bash ./ta_ia_blockchain.sh register Bob
+bash ./ta_ia_blockchain.sh revoke revoke_alice
+bash ./ta_ia_blockchain.sh refresh Bob
+```

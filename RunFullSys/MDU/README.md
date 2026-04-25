@@ -1,25 +1,26 @@
 # MDU
 
-Deploy this folder to the MDU client host or relay host.
-
-Main commands:
+Build:
 
 ```bash
-./mdu.sh refresh Bob live_refresh_1
-./mdu.sh submit-search bob_before_revoke search_before_1
-./mdu.sh wait-response search_before_1 60
-./mdu.sh collect-response Bob search_before_1
+cd app
+npm ci
+cmake -S . -B build-wsl
+cmake --build build-wsl -j
 ```
 
-Environment:
+Run:
 
 ```bash
-export PQ_ABSE_BUS_DIR=/mnt/pq_abse_bus
-export PQ_ABSE_TA_EXPORT_DIR=/mnt/pq_abse_exports
+export PQ_ABSE_TA_URL=http://TA_HOST:8081
+export PQ_ABSE_CS_URL=http://CS_HOST:8083
+cd ..
+bash ./mdu.sh search bob_before_revoke demo_search_before
 ```
 
-Use this on:
+Refresh after revocation:
 
-- a laptop beside the phone
-- a relay host
-- any client machine that can import refresh material and submit queries
+```bash
+bash ./mdu.sh refresh Bob
+bash ./mdu.sh search bob_after_revoke demo_search_after
+```

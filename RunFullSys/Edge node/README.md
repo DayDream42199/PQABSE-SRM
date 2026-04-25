@@ -1,27 +1,19 @@
 # Edge node
 
-Deploy this folder to the Edge EC2 instance.
-
-Main commands:
+Build:
 
 ```bash
-./edge_node.sh serve
-./edge_node.sh encrypt demo1
+cd app
+npm ci
+cmake -S . -B build-wsl
+cmake --build build-wsl -j
 ```
 
-Environment:
+Run:
 
 ```bash
-export PQ_ABSE_BUS_DIR=/mnt/pq_abse_bus
-export PQ_ABSE_TA_EXPORT_DIR=/mnt/pq_abse_exports
+export PQ_ABSE_TA_URL=http://TA_HOST:8081
+export PQ_ABSE_CS_URL=http://CS_HOST:8083
+cd ..
+bash ./edge_node.sh serve-http 0.0.0.0 8082
 ```
-
-This role handles:
-
-- encryption requests
-- secure index creation
-- forwarding ciphertext bundles toward CS
-
-Planned real TEE upgrade:
-
-- replace the current software TEE-backed encryption path with Nitro Enclave execution

@@ -1,23 +1,18 @@
 # CS
 
-Deploy this folder to the CS EC2 instance.
-
-Main commands:
+Build:
 
 ```bash
-./cs.sh serve
+cd app
+npm ci
+cmake -S . -B build-wsl
+cmake --build build-wsl -j
 ```
 
-Environment:
+Run:
 
 ```bash
-export PQ_ABSE_BUS_DIR=/mnt/pq_abse_bus
-export PQ_ABSE_TA_EXPORT_DIR=/mnt/pq_abse_exports
+export PQ_ABSE_TA_URL=http://TA_HOST:8081
+cd ..
+bash ./cs.sh serve-http 0.0.0.0 8083
 ```
-
-This role handles:
-
-- import of uploaded ciphertext bundles
-- query processing
-- exact match search
-- lazy re-encryption during search after revocation

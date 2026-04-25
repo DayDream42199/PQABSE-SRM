@@ -1,6 +1,6 @@
 # RunFullSys
 
-`RunFullSys` is now the AWS deployment tree for the split system roles:
+`RunFullSys` is the networked deployment tree for the split system roles:
 
 - `TA+IA+Blockchain`
 - `Edge node`
@@ -8,15 +8,11 @@
 - `MDO`
 - `MDU`
 
-This directory is no longer meant to be the local demo harness. Local experimentation stays in `RunLocal`.
+Unlike the earlier version, this tree no longer expects a shared `service_bus` directory between machines. `TA+IA+Blockchain`, `Edge node`, and `CS` now run as HTTP services, while `MDO` and `MDU` act as HTTP clients.
 
-What remains here:
+The crypto, search, revocation, and ZKP logic still live inside each role's local `app/` copy and are executed through the same C++ binaries as before. The transport layer is what changed.
 
-- the per-role runtime scripts you will run on the real machines
-- the per-role self-contained application copies in each `<role>/app`
-- AWS/Nitro deployment instructions
-
-Start with:
+Start here:
 
 - [AWS_DEPLOYMENT.md](/home/chees/FinalProjAllBuild/RunFullSys/AWS_DEPLOYMENT.md)
 - [TA+IA+Blockchain README](</home/chees/FinalProjAllBuild/RunFullSys/TA+IA+Blockchain/README.md>)

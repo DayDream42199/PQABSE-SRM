@@ -2,156 +2,145 @@
 
 ## Goal
 
-Run the full system across:
+Run the system across:
 
 - one EC2 instance for `TA+IA+Blockchain`
 - one EC2 instance for `Edge node`
 - one EC2 instance for `CS`
-- one MDO client device
-- one MDU client device
+- one MDO client host
+- one MDU client host
 
-The two TEE-backed roles are:
+The intended sensitive roles are:
 
-- `TA+IA+Blockchain`
-- `Edge node`
+- `TA+IA+Blockchain` on Nitro-capable EC2
+- `Edge node` on Nitro-capable EC2
 
-For production-style deployment, these two should use AWS Nitro Enclaves for the sensitive operations instead of the current software TEE implementation inside the code.
+`CS` can run on a normal EC2 instance.
 
-## Important note
+## Transport model
 
-`RunFullSys` no longer contains a local orchestration flow. If you want local testing, use `RunLocal`.
+`RunFullSys` now uses HTTP between roles.
 
-## 1. What to copy where
+The main service edges are:
 
-### AWS EC2 instance 1
+- `MDO -> Edge node`
+- `Edge node -> TA+IA+Blockchain`
+- `Edge node -> CS`
+- `MDU -> TA+IA+Blockchain`
+- `MDU -> CS`
+- `CS -> TA+IA+Blockchain`
+
+The old shared-folder `service_bus` and `shared_exports` flow is no longer required.
+
+## What to copy where
+
+### TA+IA+Blockchain EC2
 
 Copy:
 
 - `RunFullSys/TA+IA+Blockchain`
 
-Run there:
-
-- `ta_ia_blockchain.sh`
-
-### AWS EC2 instance 2
+### Edge node EC2
 
 Copy:
 
 - `RunFullSys/Edge node`
 
-Run there:
-
-- `edge_node.sh`
-
-### AWS EC2 instance 3
+### CS EC2
 
 Copy:
 
 - `RunFullSys/CS`
 
-Run there:
-
-- `cs.sh`
-
-### MDO device or relay host
+### MDO client host
 
 Copy:
 
 - `RunFullSys/MDO`
 
-Run there:
-
-- `mdo.sh`
-
-### MDU device or relay host
+### MDU client host
 
 Copy:
 
 - `RunFullSys/MDU`
 
-Run there:
+If the real phones cannot run this shell-based client directly, use a relay laptop or mini-PC beside each phone and treat that machine as the executable MDO or MDU endpoint.
 
-- `mdu.sh`
+## Build dependencies
 
-If your real phones cannot directly run the shell/client code, use a laptop or small relay host beside each phone and treat that relay as the executable MDO or MDU endpoint.
+Each role with an `app/` directory needs:
 
-## 2. Three EC2 instances
+- `cmake`
+- `g++`
+- `make`
+- `python3`
+- `node`
 
-Use Nitro-based instance families for all three machines. The two enclave roles must be on instance types that support Nitro Enclaves.
+Each role app also needs the ZKP Node packages installed:
 
-Recommended shape:
+```bash
+cd /srv/pq_abse/<ROLE>/app
+npm ci
+```
 
-- `TA+IA+Blockchain`: Nitro-capable EC2 with enclave support enabled
-- `Edge node`: Nitro-capable EC2 with enclave support enabled
-- `CS`: standard EC2 is acceptable, but Nitro-based is fine too
+Then build:
 
-Before deployment:
+```bash
+cmake -S . -B build-wsl
+cmake --build build-wsl -j
+```
 
-1. Create the three EC2 instances.
-2. Enable Nitro Enclaves on `TA+IA+Blockchain` and `Edge node`.
-3. Install build dependencies on each machine.
-4. Copy the corresponding role folder onto each machine with `scp` or `rsync`.
+## Network variables
 
-AWS references:
+Use these URLs on the relevant machines:
 
-- [Nitro Enclaves overview](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave.html)
-- [Getting started](https://docs.aws.amazon.com/enclaves/latest/user/getting-started.html)
-- [Attestation](https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html)
-- [EC2 SCP transfer](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/linux-file-transfer-scp.html)
+- `PQ_ABSE_TA_URL=http://TA_HOST:8081`
+- `PQ_ABSE_EDGE_URL=http://EDGE_HOST:8082`
+- `PQ_ABSE_CS_URL=http://CS_HOST:8083`
 
-## 3. Shared paths and transport
+Open the ports in your EC2 security groups only as needed.
 
-The current role scripts coordinate through two path variables:
+Suggested exposure:
 
-- `PQ_ABSE_BUS_DIR`
-- `PQ_ABSE_TA_EXPORT_DIR`
+- `TA+IA+Blockchain`: allow from `Edge node`, `MDU`, and your admin host
+- `Edge node`: allow from `MDO`
+- `CS`: allow from `Edge node` and `MDU`
 
-On AWS, you should back these with a real transport.
+## TA+IA+Blockchain EC2
 
-Practical options:
-
-- easiest prototype: shared EFS mounted on all three EC2 instances
-- simpler copy-based option: TA pushes snapshots to S3, Edge and CS pull them, clients submit requests through API or SCP
-- stronger system design: replace the file-bus with HTTP or gRPC APIs per role
-
-For your current code, the fastest path is:
-
-- EFS mount shared by `TA+IA+Blockchain`, `Edge node`, and `CS`
-- MDO and MDU upload request files through SCP, S3 sync, or a lightweight API relay
-
-## 4. Manual deployment steps
-
-### 4.1 TA+IA+Blockchain EC2
-
-Copy the role directory:
+Copy:
 
 ```bash
 scp -i /path/to/key.pem -r /home/chees/FinalProjAllBuild/RunFullSys/TA+IA+Blockchain ubuntu@TA_HOST:/srv/pq_abse/
 ```
 
-On the instance:
+Build:
 
 ```bash
 cd /srv/pq_abse/TA+IA+Blockchain/app
+npm ci
 cmake -S . -B build-wsl
 cmake --build build-wsl -j
 ```
 
-Set paths:
-
-```bash
-export PQ_ABSE_BUS_DIR=/mnt/pq_abse_bus
-export PQ_ABSE_TA_EXPORT_DIR=/mnt/pq_abse_exports
-```
-
-Start service:
+Run the HTTP service:
 
 ```bash
 cd /srv/pq_abse/TA+IA+Blockchain
-./ta_ia_blockchain.sh serve
+bash ./ta_ia_blockchain.sh serve-http 0.0.0.0 8081
 ```
 
-### 4.2 Edge node EC2
+Administrative commands on the TA machine:
+
+```bash
+bash ./ta_ia_blockchain.sh setup
+bash ./ta_ia_blockchain.sh register Alice
+bash ./ta_ia_blockchain.sh register Bob
+bash ./ta_ia_blockchain.sh revoke revoke_alice
+bash ./ta_ia_blockchain.sh refresh Bob
+```
+
+## Edge node EC2
 
 Copy:
 
@@ -163,25 +152,21 @@ Build:
 
 ```bash
 cd /srv/pq_abse/Edge\ node/app
+npm ci
 cmake -S . -B build-wsl
 cmake --build build-wsl -j
 ```
 
-Set paths:
+Run:
 
 ```bash
-export PQ_ABSE_BUS_DIR=/mnt/pq_abse_bus
-export PQ_ABSE_TA_EXPORT_DIR=/mnt/pq_abse_exports
-```
-
-Start service:
-
-```bash
+export PQ_ABSE_TA_URL=http://TA_HOST:8081
+export PQ_ABSE_CS_URL=http://CS_HOST:8083
 cd /srv/pq_abse/Edge\ node
-./edge_node.sh serve
+bash ./edge_node.sh serve-http 0.0.0.0 8082
 ```
 
-### 4.3 CS EC2
+## CS EC2
 
 Copy:
 
@@ -193,105 +178,96 @@ Build:
 
 ```bash
 cd /srv/pq_abse/CS/app
+npm ci
 cmake -S . -B build-wsl
 cmake --build build-wsl -j
 ```
 
-Set paths:
+Run:
 
 ```bash
-export PQ_ABSE_BUS_DIR=/mnt/pq_abse_bus
-export PQ_ABSE_TA_EXPORT_DIR=/mnt/pq_abse_exports
-```
-
-Start service:
-
-```bash
+export PQ_ABSE_TA_URL=http://TA_HOST:8081
 cd /srv/pq_abse/CS
-./cs.sh serve
+bash ./cs.sh serve-http 0.0.0.0 8083
 ```
 
-## 5. Dumping code to MDO and MDU
+## MDO host
 
-For MDO, copy:
-
-- `RunFullSys/MDO`
-
-For MDU, copy:
-
-- `RunFullSys/MDU`
-
-Those can live on:
-
-- a laptop attached to the phone
-- a relay mini-PC
-- a Termux-style Android environment if you adapt the build/runtime setup yourself
-
-MDO and MDU do not need Nitro Enclaves. They need network reachability to your chosen request transport.
-
-## 6. Expected execution order
-
-### Initial setup
-
-1. Start `TA+IA+Blockchain`
-2. Start `Edge node`
-3. Start `CS`
-4. Run TA setup
-5. Register users
-
-Example TA commands:
+Copy:
 
 ```bash
-./ta_ia_blockchain.sh setup
-./ta_ia_blockchain.sh register Alice
-./ta_ia_blockchain.sh register Bob
+scp -i /path/to/key.pem -r /home/chees/FinalProjAllBuild/RunFullSys/MDO user@MDO_HOST:/srv/pq_abse/
 ```
 
-### Upload flow
-
-From MDO:
+Run upload:
 
 ```bash
-./mdo.sh encrypt-upload demo1 demo_encrypt_1
-./mdo.sh wait-edge demo_encrypt_1 60
+export PQ_ABSE_EDGE_URL=http://EDGE_HOST:8082
+cd /srv/pq_abse/MDO
+bash ./mdo.sh encrypt-upload demo1 demo_encrypt_1
 ```
 
-### Query flow
+## MDU host
 
-From MDU:
+Copy:
 
 ```bash
-./mdu.sh submit-search bob_before_revoke search_before_1
-./mdu.sh wait-response search_before_1 60
-./mdu.sh collect-response Bob search_before_1
+scp -i /path/to/key.pem -r /home/chees/FinalProjAllBuild/RunFullSys/MDU user@MDU_HOST:/srv/pq_abse/
 ```
 
-### Revocation flow
-
-From TA:
+Build:
 
 ```bash
-./ta_ia_blockchain.sh submit-revoke revoke_alice live_revoke_1
+cd /srv/pq_abse/MDU/app
+npm ci
+cmake -S . -B build-wsl
+cmake --build build-wsl -j
 ```
 
-From MDU:
+Run:
 
 ```bash
-./mdu.sh refresh Bob live_refresh_1
-./mdu.sh submit-search bob_after_revoke search_after_1
-./mdu.sh wait-response search_after_1 60
-./mdu.sh collect-response Bob search_after_1
+export PQ_ABSE_TA_URL=http://TA_HOST:8081
+export PQ_ABSE_CS_URL=http://CS_HOST:8083
+cd /srv/pq_abse/MDU
+bash ./mdu.sh search bob_before_revoke demo_search_before
 ```
 
-## 7. Real TEE requirement
+Refresh after revocation:
 
-Right now, the role split is ready for AWS deployment, but the enclave-sensitive code still uses the current in-project software TEE behavior.
+```bash
+bash ./mdu.sh refresh Bob
+bash ./mdu.sh search bob_after_revoke demo_search_after
+```
 
-To satisfy the real TEE requirement, the next implementation step is:
+## Startup order
 
-- move TA keygen operations into a Nitro Enclave worker
-- move Edge encryption and secure-index generation into a Nitro Enclave worker
-- have the parent EC2 instance communicate with the enclave over vsock
-- optionally add Nitro attestation checks before the clients trust the outputs
+Start services first:
 
-That is the next phase, not the local cleanup phase.
+1. `TA+IA+Blockchain`
+2. `CS`
+3. `Edge node`
+
+Then initialize the authority:
+
+1. `bash ./ta_ia_blockchain.sh setup`
+2. `bash ./ta_ia_blockchain.sh register Alice`
+3. `bash ./ta_ia_blockchain.sh register Bob`
+
+Then run the demo flow:
+
+1. MDO uploads with `bash ./mdo.sh encrypt-upload demo1 demo_encrypt_1`
+2. MDU searches with `bash ./mdu.sh search bob_before_revoke demo_search_before`
+3. TA revokes Alice with `bash ./ta_ia_blockchain.sh revoke revoke_alice`
+4. MDU refreshes Bob with `bash ./mdu.sh refresh Bob`
+5. MDU searches again with `bash ./mdu.sh search bob_after_revoke demo_search_after`
+
+Expected behavior:
+
+- Bob decrypts `hello_pq_world` before revocation
+- Bob decrypts `hello_pq_world` after refresh
+- Alice fails after revocation until refreshed
+
+## Nitro note
+
+The transport is now HTTP, but the active runtime path still calls the current C++ binaries. The repository already contains Nitro-related code for TA and Edge enclaves, but wiring those enclave binaries into the live HTTP service path is still a separate hardening step.

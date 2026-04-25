@@ -2,14 +2,17 @@
 set -euo pipefail
 
 ROLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$ROLE_DIR/.." && pwd)"
 APP_DIR="$ROLE_DIR/app"
 BUILD_DIR="$APP_DIR/build-wsl"
-BUS_DIR="${PQ_ABSE_BUS_DIR:-$ROOT_DIR/service_bus}"
-TA_EXPORT_DIR="${PQ_ABSE_TA_EXPORT_DIR:-$ROOT_DIR/shared_exports}"
+TA_URL="${PQ_ABSE_TA_URL:-http://127.0.0.1:8081}"
+HTTP_HOST="${PQ_ABSE_HTTP_HOST:-0.0.0.0}"
+HTTP_PORT="${PQ_ABSE_CS_PORT:-8083}"
 
-ensure_bus() {
-  mkdir -p "$BUS_DIR/cs/uploads" "$BUS_DIR/cs/queries" "$BUS_DIR/cs/acks" "$BUS_DIR/cs/archive" "$BUS_DIR/mdu/responses"
+require_build() {
+  if [[ ! -d "$BUILD_DIR" ]]; then
+    echo "Missing build directory: $BUILD_DIR" >&2
+    exit 1
+  fi
 }
 
 rewrite_bundle_metadata() {
@@ -38,27 +41,22 @@ PY
 }
 
 sync_state_from_ta() {
-  local latest_dir="$TA_EXPORT_DIR/shared_state/latest"
-  [[ -d "$latest_dir/abse" && -d "$latest_dir/state" ]] || return 0
-  local sync_dir="$APP_DIR/runtime/.sync.$$"
-  rm -rf "$sync_dir"
-  mkdir -p "$sync_dir"
-  cp -a "$latest_dir/abse" "$sync_dir/" || { rm -rf "$sync_dir"; return 0; }
-  cp -a "$latest_dir/state" "$sync_dir/" || { rm -rf "$sync_dir"; return 0; }
-  if [[ -d "$latest_dir/cloud" ]]; then
-    cp -a "$latest_dir/cloud" "$sync_dir/" || true
-  fi
+  local archive
+  local sync_dir
+  archive="$(mktemp)"
+  sync_dir="$(mktemp -d)"
+  curl -fsS "$TA_URL/state/latest.tar.gz" -o "$archive"
+  tar -xzf "$archive" -C "$sync_dir"
   mkdir -p "$APP_DIR/runtime"
   rm -rf "$APP_DIR/runtime/abse" "$APP_DIR/runtime/state" "$APP_DIR/runtime/cloud"
-  cp -a "$sync_dir/abse" "$APP_DIR/runtime/"
-  cp -a "$sync_dir/state" "$APP_DIR/runtime/"
-  if [[ -d "$sync_dir/cloud" ]]; then
-    cp -a "$sync_dir/cloud" "$APP_DIR/runtime/"
-  fi
+  [[ -d "$sync_dir/abse" ]] && cp -a "$sync_dir/abse" "$APP_DIR/runtime/"
+  [[ -d "$sync_dir/state" ]] && cp -a "$sync_dir/state" "$APP_DIR/runtime/"
+  [[ -d "$sync_dir/cloud" ]] && cp -a "$sync_dir/cloud" "$APP_DIR/runtime/"
   rm -rf "$sync_dir"
+  rm -f "$archive"
 }
 
-import_upload() {
+import_upload_dir() {
   local upload_dir="${1:?}"
   mkdir -p "$APP_DIR/runtime/ciphertexts"
   cp -f "$upload_dir"/*_bundle.bin "$APP_DIR/runtime/ciphertexts/" 2>/dev/null || true
@@ -71,50 +69,29 @@ import_upload() {
   rm -f "$APP_DIR"/runtime/search/bitmap_index_epoch_*.bin 2>/dev/null || true
 }
 
-process_once() {
-  ensure_bus
+process_query_dir() {
+  require_build
+  local req_dir="${1:?}"
+  local response_dir="${2:?}"
   sync_state_from_ta
-  shopt -s nullglob
-  for upload_dir in "$BUS_DIR/cs/uploads"/*; do
-    [[ -d "$upload_dir" ]] || continue
-    [[ "$(basename "$upload_dir")" == *.done ]] && continue
-    import_upload "$upload_dir"
-    rm -rf "$upload_dir"
-  done
-  for req_dir in "$BUS_DIR/cs/queries"/*; do
-    [[ -d "$req_dir" ]] || continue
-    [[ "$(basename "$req_dir")" == *.done ]] && continue
-    local id response_dir
-    id="$(basename "$req_dir")"
-    response_dir="$BUS_DIR/mdu/responses/$id"
-    rm -rf "$response_dir"
-    mkdir -p "$response_dir"
-    if "$BUILD_DIR/cs_process_query" --request-dir "$req_dir" --response-dir "$response_dir"; then
-      mkdir -p "$BUS_DIR/cs/acks/$id"
-      printf 'ok\n' > "$BUS_DIR/cs/acks/$id/status.txt"
-    else
-      mkdir -p "$BUS_DIR/cs/acks/$id"
-      printf 'fail\n' > "$BUS_DIR/cs/acks/$id/status.txt"
-    fi
-    mv "$req_dir" "$BUS_DIR/cs/archive/$id.query.done"
-  done
+  "$BUILD_DIR/cs_process_query" --request-dir "$req_dir" --response-dir "$response_dir"
 }
 
-serve() {
-  ensure_bus
-  while true; do
-    process_once
-    sleep 1
-  done
+serve_http() {
+  exec python3 "$ROLE_DIR/http_server.py" \
+    --host "${2:-$HTTP_HOST}" \
+    --port "${3:-$HTTP_PORT}" \
+    --role-dir "$ROLE_DIR"
 }
 
 cmd="${1:-}"
 case "$cmd" in
   sync-state) sync_state_from_ta ;;
-  process-once) process_once ;;
-  serve) serve ;;
+  import-upload-dir) import_upload_dir "${2:?}" ;;
+  process-query-dir) process_query_dir "${2:?}" "${3:?}" ;;
+  serve-http) serve_http "$@" ;;
   *)
-    echo "Usage: $0 {sync-state|process-once|serve}" >&2
+    echo "Usage: $0 {sync-state|import-upload-dir <dir>|process-query-dir <request-dir> <response-dir>|serve-http [host] [port]}" >&2
     exit 1
     ;;
 esac
