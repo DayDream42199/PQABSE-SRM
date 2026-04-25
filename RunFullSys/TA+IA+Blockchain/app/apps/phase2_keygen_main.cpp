@@ -1,11 +1,15 @@
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <random>
+#include <sstream>
 
 #include "entities/NitroTeeClient.h"
 #include "entities/SoftwareTee.h"
 #include "phase2_keygen.h"
 #include "pq_src/IdentityAuthority.h"
 #include "pq_src/TrustedAuthority.h"
+#include "system/ExperimentMetrics.h"
 #include "system/Artifacts.h"
 #include "system/Cli.h"
 #include "system/RuntimePaths.h"
@@ -25,6 +29,15 @@ abse_zkp::NitroTeeOptions LoadNitroOptions(const abse_zkp::CliArgs& cli) {
     options.timeout_ms = std::stoi(cli.Get("--nitro-timeout-ms", "30000"));
     return options;
 }
+
+bool WriteTimingFile(const std::string& path_value, double duration_ms) {
+    if (path_value.empty()) {
+        return true;
+    }
+    std::ostringstream output;
+    output << std::fixed << std::setprecision(3) << duration_ms;
+    return abse_zkp::WriteTextFile(path_value, output.str());
+}
 }
 
 int main(int argc, char** argv) {
@@ -35,6 +48,8 @@ int main(int argc, char** argv) {
     std::string gid;
     std::vector<std::string> attrs;
     int identity_secret = 0;
+    double keygen_ms = 0.0;
+    const auto timing_out = cli.Get("--timing-out");
 
     if (!cli.Get("--user").empty()) {
         const auto scenario = LoadTestScenario(cli.Get("--scenario", DefaultScenarioPath().string()));
@@ -91,6 +106,7 @@ int main(int argc, char** argv) {
             return 7;
         }
         identity_secret = record.identity_secret;
+        const auto keygen_start = Clock::now();
         if (use_nitro) {
             nitro_tee.GenerateUserKey(params,
                                       pk,
@@ -104,23 +120,36 @@ int main(int argc, char** argv) {
         } else {
             tee.GenerateUserKey(params, pk, msk, gid, attrs, user_key, Blockchain.current_state.epoch, rekey_state.update_token_seed);
         }
+        keygen_ms = ElapsedMilliseconds(keygen_start, Clock::now());
         if (!SaveUserSecretKey(params, user_key, record.user_key_path)) { std::cerr << "Failed to save refreshed user key" << std::endl; return 8; }
         record.local_epoch = Blockchain.current_state.epoch;
         record.attributes = user_key.attributes;
         if (!SaveUserCredentialRecord(record)) { std::cerr << "Failed to update user credential record" << std::endl; return 9; }
+        if (!WriteTimingFile(timing_out, keygen_ms)) {
+            std::cerr << "Failed to write keygen timing output" << std::endl;
+            return 10;
+        }
         std::cout << "Phase 2 key refresh complete for " << gid << std::endl;
+        std::cout << "Keygen ms: " << std::fixed << std::setprecision(3) << keygen_ms << std::endl;
         return 0;
     }
 
     ia.register_user(gid, identity_secret);
+    const auto keygen_start = Clock::now();
     if (use_nitro) {
         nitro_tee.GenerateUserKey(params, pk, msk, gid, attrs, user_key, Blockchain.current_state.epoch, "", nitro_options);
     } else {
         tee.GenerateUserKey(params, pk, msk, gid, attrs, user_key, Blockchain.current_state.epoch, "");
     }
+    keygen_ms = ElapsedMilliseconds(keygen_start, Clock::now());
     if (!SaveUserSecretKey(params, user_key, UserSecretKeyPath(gid).string())) { std::cerr << "Failed to save user key" << std::endl; return 10; }
     UserCredentialRecord record{gid, identity_secret, Blockchain.current_state.epoch, UserSecretKeyPath(gid).string(), user_key.attributes};
     if (!SaveUserCredentialRecord(record)) { std::cerr << "Failed to save user credential record" << std::endl; return 11; }
+    if (!WriteTimingFile(timing_out, keygen_ms)) {
+        std::cerr << "Failed to write keygen timing output" << std::endl;
+        return 12;
+    }
     std::cout << "Phase 2 key generation complete for " << gid << std::endl;
+    std::cout << "Keygen ms: " << std::fixed << std::setprecision(3) << keygen_ms << std::endl;
     return 0;
 }

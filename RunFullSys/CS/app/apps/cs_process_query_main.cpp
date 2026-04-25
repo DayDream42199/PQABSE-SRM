@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
 #include "entities/SearchGateway.h"
 #include "phase1_setup.h"
@@ -10,6 +12,7 @@
 #include "system/Artifacts.h"
 #include "system/AuthTokenIO.h"
 #include "system/Cli.h"
+#include "system/ExperimentMetrics.h"
 #include "system/RuntimePaths.h"
 
 namespace {
@@ -56,6 +59,7 @@ int main(int argc, char** argv) {
     using namespace abse_zkp;
     EnsureRuntimeDirectories();
     CliArgs cli(argc, argv);
+    const auto candidate_timing_out = cli.Get("--candidate-timing-out");
 
     const auto request_dir = std::filesystem::path(cli.Require("--request-dir"));
     const auto response_dir = std::filesystem::path(cli.Require("--response-dir"));
@@ -106,9 +110,11 @@ int main(int argc, char** argv) {
     }
 
     const auto search_index = LoadOrBuildSearchIndex(params, Blockchain.current_state.epoch);
+    const auto candidate_start = Clock::now();
     auto candidate_labels = search_index.ResolveLabels(
         search_index.ExecuteAdaptiveSearch(
             BuildEpochBitmapKeys(shortlist_trapdoor.keyword_tokens, Blockchain.current_state.epoch, epoch_bitmap_key)));
+    const double candidate_generation_ms = ElapsedMilliseconds(candidate_start, Clock::now());
 
     if (!preferred_label.empty()) {
         candidate_labels.erase(
@@ -158,8 +164,17 @@ int main(int argc, char** argv) {
     WriteTextFile(response_dir / "candidate_count.txt", std::to_string(candidate_labels.size()));
     WriteTextFile(response_dir / "exact_match_count.txt", std::to_string(exact_match_count));
     WriteTextFile(response_dir / "epoch.txt", std::to_string(Blockchain.current_state.epoch));
+    if (!candidate_timing_out.empty()) {
+        std::ostringstream output;
+        output << std::fixed << std::setprecision(3) << candidate_generation_ms;
+        if (!WriteTextFile(candidate_timing_out, output.str())) {
+            std::cerr << "Failed to write candidate generation timing" << std::endl;
+            return 6;
+        }
+    }
 
     std::cout << "CS response prepared at " << response_dir << std::endl;
     std::cout << "Candidates: " << candidate_labels.size() << ", exact matches: " << exact_match_count << std::endl;
+    std::cout << "Candidate generation ms: " << std::fixed << std::setprecision(3) << candidate_generation_ms << std::endl;
     return 0;
 }
