@@ -15,6 +15,8 @@ The crypto, search, revocation, and ZKP logic still live inside each role's loca
 Start here:
 
 - [AWS_DEPLOYMENT.md](/home/chees/FinalProjAllBuild/RunFullSys/AWS_DEPLOYMENT.md)
+- [AWS_NITRO_TEE.md](/home/chees/FinalProjAllBuild/RunFullSys/AWS_NITRO_TEE.md)
+- [AWS_NITRO_SMOKE_TEST.md](/home/chees/FinalProjAllBuild/RunFullSys/AWS_NITRO_SMOKE_TEST.md)
 - [TA+IA+Blockchain README](</home/chees/FinalProjAllBuild/RunFullSys/TA+IA+Blockchain/README.md>)
 - [Edge node README](</home/chees/FinalProjAllBuild/RunFullSys/Edge node/README.md>)
 - [CS README](/home/chees/FinalProjAllBuild/RunFullSys/CS/README.md)

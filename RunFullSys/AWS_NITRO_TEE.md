@@ -29,6 +29,23 @@ The existing software path still works. The Nitro path is enabled with:
 
 These are typically on different parent instances, so reusing the same port is fine.
 
+## HTTP role integration
+
+In the HTTP deployment, the TA and Edge role scripts can now forward Nitro settings into the live parent binaries.
+
+Set these environment variables before starting the HTTP role service:
+
+```bash
+export PQ_ABSE_TEE_MODE=nitro
+export PQ_ABSE_NITRO_CID=16
+export PQ_ABSE_NITRO_PORT=5005
+export PQ_ABSE_NITRO_TIMEOUT_MS=30000
+```
+
+The TA service will then invoke `phase2_keygen` in Nitro mode, and the Edge service will invoke `phase3_encrypt` in Nitro mode.
+
+If you do not set `PQ_ABSE_TEE_MODE=nitro`, the services stay on the existing software TEE path.
+
 ## Build
 
 Build in each role folder:
@@ -89,6 +106,24 @@ Inside the enclave image, run one of:
 ```
 
 For smoke tests, you can add `--once` so the enclave handles one request and exits.
+
+## Smoke test meaning
+
+A smoke test is a very small end-to-end check that tells us whether the basic system is alive.
+
+For this repo, a smoke test means:
+
+1. The parent binary starts.
+2. The enclave server starts.
+3. The parent connects to the enclave over `vsock`.
+4. One trusted request succeeds.
+5. A result comes back without crashing.
+
+It is not a full experiment or performance test. It is just the fastest way to answer:
+
+- "Does the Nitro path basically work?"
+- "Can these two processes actually talk to each other?"
+- "Do we get one successful TA or Edge trusted operation back?"
 
 ## AWS instance setup notes
 
