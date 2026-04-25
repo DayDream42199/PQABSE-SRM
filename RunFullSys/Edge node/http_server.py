@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import io
 import json
 import os
@@ -10,6 +11,18 @@ import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+
+def load_key_values(path: Path):
+    values = {}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in raw_line:
+            continue
+        key, value = raw_line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
 
 
 def make_tar_bytes(paths):
@@ -40,6 +53,10 @@ class EdgeHandler(BaseHTTPRequestHandler):
     def cs_url(self) -> str:
         return os.environ.get("PQ_ABSE_CS_URL", "http://127.0.0.1:8083").rstrip("/")
 
+    @property
+    def runtime_dir(self) -> Path:
+        return self.app_dir / "runtime"
+
     def _send_json(self, status, payload):
         encoded = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -63,13 +80,120 @@ class EdgeHandler(BaseHTTPRequestHandler):
             env=os.environ.copy(),
         )
 
+    def _load_blockchain_state(self):
+        values = load_key_values(self.runtime_dir / "state" / "blockchain_state.txt")
+        return {
+            "epoch": int(values.get("epoch", "0")),
+            "registration_root": values.get("registration_root", ""),
+            "revocation_root": values.get("revocation_root", ""),
+        }
+
+    def _load_bundle_package(self, label: str):
+        bundle_bin = self.runtime_dir / "ciphertexts" / f"{label}_bundle.bin"
+        bundle_meta = self.runtime_dir / "ciphertexts" / f"{label}_bundle.meta"
+        if not bundle_bin.exists() or not bundle_meta.exists():
+            return None
+        return {
+            "bundle_label": label,
+            "bundle_meta": load_key_values(bundle_meta),
+            "bundle_bin_base64": base64.b64encode(bundle_bin.read_bytes()).decode("ascii"),
+            "bundle_meta_base64": base64.b64encode(bundle_meta.read_bytes()).decode("ascii"),
+        }
+
     def do_GET(self):
         if self.path == "/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
             return
+        if self.path == "/mobile/state":
+            self._send_json(HTTPStatus.OK, {"status": "ok", "blockchain_state": self._load_blockchain_state()})
+            return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/mobile/encrypt":
+            try:
+                payload = self._read_json()
+            except json.JSONDecodeError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid json: {exc}"})
+                return
+
+            owner_gid = (payload.get("owner_gid") or payload.get("data_owner_gid") or "").strip()
+            label = (payload.get("label") or payload.get("bundle_label") or "").strip()
+            plaintext = payload.get("plaintext") or ""
+            keywords = payload.get("keywords") or []
+            policy_type = (payload.get("policy_type") or "and").strip()
+            threshold = payload.get("threshold", 1)
+            policy_attrs = payload.get("policy_attrs") or payload.get("policy_attributes") or []
+
+            if not owner_gid:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: owner_gid"})
+                return
+            if not label:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: label"})
+                return
+            if not isinstance(plaintext, str) or not plaintext:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: plaintext"})
+                return
+            if not isinstance(keywords, list) or not all(isinstance(item, str) and item.strip() for item in keywords):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "keywords must be a non-empty string list"})
+                return
+            if not isinstance(policy_attrs, list) or not all(isinstance(item, str) and item.strip() for item in policy_attrs):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "policy_attrs must be a non-empty string list"})
+                return
+
+            sync_result = self._run_script("sync-state")
+            if sync_result.returncode != 0:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "state sync failed", "stderr": sync_result.stderr})
+                return
+
+            args = [
+                "encrypt-raw",
+                owner_gid,
+                label,
+                plaintext,
+                policy_type,
+                str(threshold),
+                ",".join(item.strip() for item in keywords),
+                ",".join(item.strip() for item in policy_attrs),
+            ]
+            encrypt_result = self._run_script(*args)
+            if encrypt_result.returncode != 0:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "status": "fail",
+                        "error": "encrypt failed",
+                        "stdout": encrypt_result.stdout,
+                        "stderr": encrypt_result.stderr,
+                    },
+                )
+                return
+
+            bundle_package = self._load_bundle_package(label)
+            if bundle_package is None:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "status": "fail",
+                        "error": f"encryption succeeded but bundle files for {label} were not found",
+                        "stdout": encrypt_result.stdout,
+                        "stderr": encrypt_result.stderr,
+                    },
+                )
+                return
+
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "status": "ok",
+                    "stdout": encrypt_result.stdout,
+                    "stderr": encrypt_result.stderr,
+                    "blockchain_state": self._load_blockchain_state(),
+                    "bundle": bundle_package,
+                },
+            )
+            return
+
         if self.path != "/encrypt":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return

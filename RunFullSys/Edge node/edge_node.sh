@@ -49,6 +49,44 @@ run_encrypt() {
   "$BUILD_DIR/phase3_encrypt" --scenario "$SCENARIO_PATH" --bundle "$bundle" "${tee_args[@]}"
 }
 
+run_encrypt_raw() {
+  require_build
+  local owner_gid="${1:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
+  local label="${2:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
+  local plaintext="${3:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
+  local policy_type="${4:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
+  local threshold="${5:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
+  local keyword_csv="${6:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
+  local policy_attr_csv="${7:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
+
+  local args=(
+    "$BUILD_DIR/phase3_encrypt"
+    --owner-gid "$owner_gid"
+    --label "$label"
+    --plaintext "$plaintext"
+    --policy-type "$policy_type"
+    --threshold "$threshold"
+  )
+
+  local item
+  IFS=',' read -r -a keyword_array <<< "$keyword_csv"
+  for item in "${keyword_array[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ -n "$item" ]] && args+=(--keyword "$item")
+  done
+
+  IFS=',' read -r -a policy_attr_array <<< "$policy_attr_csv"
+  for item in "${policy_attr_array[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ -n "$item" ]] && args+=(--policy-attr "$item")
+  done
+
+  args+=("${tee_args[@]}")
+  "${args[@]}"
+}
+
 serve_http() {
   exec python3 "$ROLE_DIR/http_server.py" \
     --host "${2:-$HTTP_HOST}" \
@@ -60,9 +98,10 @@ cmd="${1:-}"
 case "$cmd" in
   sync-state) sync_state_from_ta ;;
   encrypt) run_encrypt "${2:-}" ;;
+  encrypt-raw) shift; run_encrypt_raw "$@" ;;
   serve-http) serve_http "$@" ;;
   *)
-    echo "Usage: $0 {sync-state|encrypt <bundle>|serve-http [host] [port]}" >&2
+    echo "Usage: $0 {sync-state|encrypt <bundle>|encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>|serve-http [host] [port]}" >&2
     exit 1
     ;;
 esac

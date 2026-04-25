@@ -36,6 +36,24 @@ run_register() {
   "$BUILD_DIR/phase2_keygen" --scenario "$SCENARIO_PATH" --user "$user" "${tee_args[@]}"
 }
 
+run_register_raw() {
+  require_build
+  local gid="${1:?usage: ta_ia_blockchain.sh register-raw <gid> <attr> [attr ...]}"
+  shift
+  if [[ "$#" -eq 0 ]]; then
+    echo "register-raw requires at least one attribute" >&2
+    exit 1
+  fi
+
+  local args=("$BUILD_DIR/phase2_keygen" --gid "$gid")
+  local attr
+  for attr in "$@"; do
+    args+=(--attr "$attr")
+  done
+  args+=("${tee_args[@]}")
+  "${args[@]}"
+}
+
 run_refresh() {
   require_build
   local user="${1:?usage: ta_ia_blockchain.sh refresh <scenario-user-name>}"
@@ -59,11 +77,12 @@ cmd="${1:-}"
 case "$cmd" in
   setup) run_setup ;;
   register) run_register "${2:-}" ;;
+  register-raw) shift; run_register_raw "$@" ;;
   refresh) run_refresh "${2:-}" ;;
   revoke) run_revoke "${2:-}" ;;
   serve-http) serve_http "$@" ;;
   *)
-    echo "Usage: $0 {setup|register <user>|refresh <user>|revoke <revocation>|serve-http [host] [port]}" >&2
+    echo "Usage: $0 {setup|register <user>|register-raw <gid> <attr> [attr ...]|refresh <user>|revoke <revocation>|serve-http [host] [port]}" >&2
     exit 1
     ;;
 esac

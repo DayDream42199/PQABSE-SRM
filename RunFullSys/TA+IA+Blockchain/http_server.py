@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import io
 import json
 import os
@@ -9,6 +10,18 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+
+
+def load_key_values(path: Path):
+    values = {}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in raw_line:
+            continue
+        key, value = raw_line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
 
 
 def make_tar_bytes(base: Path, members):
@@ -35,6 +48,10 @@ class TaHandler(BaseHTTPRequestHandler):
     @property
     def script_path(self) -> Path:
         return self.role_dir / "ta_ia_blockchain.sh"
+
+    @property
+    def runtime_dir(self) -> Path:
+        return self.app_dir / "runtime"
 
     def _send_json(self, status, payload):
         encoded = json.dumps(payload).encode("utf-8")
@@ -66,10 +83,60 @@ class TaHandler(BaseHTTPRequestHandler):
             env=os.environ.copy(),
         )
 
+    def _load_blockchain_state(self):
+        state_path = self.runtime_dir / "state" / "blockchain_state.txt"
+        values = load_key_values(state_path)
+        return {
+            "epoch": int(values.get("epoch", "0")),
+            "registration_root": values.get("registration_root", ""),
+            "revocation_root": values.get("revocation_root", ""),
+        }
+
+    def _load_cloud_rekey_state(self):
+        values = load_key_values(self.runtime_dir / "cloud" / "rekey_state.txt")
+        if not values:
+            return None
+        return {
+            "epoch": int(values.get("epoch", "0")),
+            "re_encryption_key": values.get("re_encryption_key", ""),
+            "update_token_seed": values.get("update_token_seed", ""),
+            "revoked_user_gid": values.get("revoked_user_gid", ""),
+        }
+
+    def _load_mobile_user_package(self, gid: str):
+        cred_path = self.runtime_dir / "users" / f"{gid}.cred"
+        cred_values = load_key_values(cred_path)
+        if not cred_values:
+            return None
+
+        user_key_path = self.runtime_dir / "users" / f"{gid}_userkey.bin"
+        user_key_b64 = ""
+        if user_key_path.exists():
+            user_key_b64 = base64.b64encode(user_key_path.read_bytes()).decode("ascii")
+
+        attributes = [item for item in cred_values.get("attributes", "").split(",") if item]
+        return {
+            "gid": cred_values.get("gid", gid),
+            "identity_secret": int(cred_values.get("identity_secret", "0")),
+            "local_epoch": int(cred_values.get("local_epoch", "0")),
+            "attributes": attributes,
+            "user_key_base64": user_key_b64,
+        }
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
+            return
+        if parsed.path == "/mobile/state":
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "status": "ok",
+                    "blockchain_state": self._load_blockchain_state(),
+                    "cloud_rekey_state": self._load_cloud_rekey_state(),
+                },
+            )
             return
         if parsed.path == "/state/latest.tar.gz":
             body = make_tar_bytes(self.app_dir / "runtime", ["abse", "state", "cloud"])
@@ -93,6 +160,56 @@ class TaHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
         except json.JSONDecodeError as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid json: {exc}"})
+            return
+
+        if parsed.path == "/mobile/register":
+            gid = (payload.get("gid") or "").strip()
+            attributes = payload.get("attributes") or []
+            if not gid:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: gid"})
+                return
+            if not isinstance(attributes, list) or not all(isinstance(item, str) and item.strip() for item in attributes):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "attributes must be a non-empty string list"})
+                return
+
+            args = ["register-raw", gid, *[item.strip() for item in attributes]]
+            result = self._run_script(*args)
+            if result.returncode != 0:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "status": "fail",
+                        "command": args,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                    },
+                )
+                return
+
+            user_package = self._load_mobile_user_package(gid)
+            if user_package is None:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "status": "fail",
+                        "error": f"registration succeeded but no credential package found for {gid}",
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                    },
+                )
+                return
+
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "status": "ok",
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "user": user_package,
+                    "blockchain_state": self._load_blockchain_state(),
+                    "cloud_rekey_state": self._load_cloud_rekey_state(),
+                },
+            )
             return
 
         routes = {

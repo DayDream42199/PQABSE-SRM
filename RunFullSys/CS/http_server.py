@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import io
 import json
 import os
-import shutil
 import subprocess
 import tarfile
 import tempfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+
+def load_key_values(path: Path):
+    values = {}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in raw_line:
+            continue
+        key, value = raw_line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
 
 
 def tar_directory(directory: Path) -> bytes:
@@ -35,6 +47,14 @@ class CsHandler(BaseHTTPRequestHandler):
     @property
     def script_path(self) -> Path:
         return self.role_dir / "cs.sh"
+
+    @property
+    def app_dir(self) -> Path:
+        return self.role_dir / "app"
+
+    @property
+    def runtime_dir(self) -> Path:
+        return self.app_dir / "runtime"
 
     def _send_json(self, status, payload):
         encoded = json.dumps(payload).encode("utf-8")
@@ -65,13 +85,138 @@ class CsHandler(BaseHTTPRequestHandler):
             env=os.environ.copy(),
         )
 
+    def _load_blockchain_state(self):
+        values = load_key_values(self.runtime_dir / "state" / "blockchain_state.txt")
+        return {
+            "epoch": int(values.get("epoch", "0")),
+            "registration_root": values.get("registration_root", ""),
+            "revocation_root": values.get("revocation_root", ""),
+        }
+
+    def _list_stored_bundle_labels(self):
+        ciphertext_dir = self.runtime_dir / "ciphertexts"
+        if not ciphertext_dir.exists():
+            return []
+        labels = []
+        for meta_path in sorted(ciphertext_dir.glob("*_bundle.meta")):
+            labels.append(meta_path.name[:-len("_bundle.meta")])
+        return labels
+
+    def _load_mobile_response(self, response_dir: Path):
+        bundle_dir = response_dir / "bundles"
+        bundles = []
+        if bundle_dir.exists():
+            for bundle_bin in sorted(bundle_dir.glob("*_bundle.bin")):
+                label = bundle_bin.name[:-len("_bundle.bin")]
+                bundle_meta = bundle_dir / f"{label}_bundle.meta"
+                bundles.append(
+                    {
+                        "bundle_label": label,
+                        "bundle_meta": load_key_values(bundle_meta),
+                        "bundle_bin_base64": base64.b64encode(bundle_bin.read_bytes()).decode("ascii"),
+                        "bundle_meta_base64": base64.b64encode(bundle_meta.read_bytes()).decode("ascii")
+                        if bundle_meta.exists()
+                        else "",
+                    }
+                )
+
+        return {
+            "epoch": int((response_dir / "epoch.txt").read_text(encoding="utf-8").strip() or "0")
+            if (response_dir / "epoch.txt").exists()
+            else 0,
+            "candidate_count": int((response_dir / "candidate_count.txt").read_text(encoding="utf-8").strip() or "0")
+            if (response_dir / "candidate_count.txt").exists()
+            else 0,
+            "exact_match_count": int((response_dir / "exact_match_count.txt").read_text(encoding="utf-8").strip() or "0")
+            if (response_dir / "exact_match_count.txt").exists()
+            else 0,
+            "bundles": bundles,
+        }
+
     def do_GET(self):
         if self.path == "/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
             return
+        if self.path == "/mobile/state":
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "status": "ok",
+                    "blockchain_state": self._load_blockchain_state(),
+                    "stored_bundle_labels": self._list_stored_bundle_labels(),
+                },
+            )
+            return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/mobile/query":
+            try:
+                payload = json.loads((self._read_body() or b"{}").decode("utf-8"))
+            except json.JSONDecodeError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid json: {exc}"})
+                return
+
+            gid = (payload.get("gid") or "").strip()
+            preferred_label = (payload.get("preferred_label") or payload.get("label") or "").strip()
+            auth_token_base64 = (payload.get("auth_token_base64") or "").strip()
+            shortlist_trapdoor_base64 = (payload.get("shortlist_trapdoor_base64") or "").strip()
+
+            if not gid:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: gid"})
+                return
+            if not auth_token_base64:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: auth_token_base64"})
+                return
+            if not shortlist_trapdoor_base64:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: shortlist_trapdoor_base64"})
+                return
+
+            try:
+                auth_token_bytes = base64.b64decode(auth_token_base64, validate=True)
+                shortlist_trapdoor_bytes = base64.b64decode(shortlist_trapdoor_base64, validate=True)
+            except Exception as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid base64 payload: {exc}"})
+                return
+
+            with tempfile.TemporaryDirectory(prefix="pqabse-mobile-query-") as temp_dir_name:
+                temp_dir = Path(temp_dir_name)
+                request_dir = temp_dir / "request"
+                response_dir = temp_dir / "response"
+                request_dir.mkdir()
+                response_dir.mkdir()
+
+                (request_dir / "auth_token.txt").write_bytes(auth_token_bytes)
+                (request_dir / "shortlist_trapdoor.bin").write_bytes(shortlist_trapdoor_bytes)
+                (request_dir / "gid.txt").write_text(gid, encoding="utf-8")
+                if preferred_label:
+                    (request_dir / "preferred_label.txt").write_text(preferred_label, encoding="utf-8")
+
+                result = self._run_script("process-query-dir", str(request_dir), str(response_dir))
+                if result.returncode != 0:
+                    self._send_json(
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                        {
+                            "status": "fail",
+                            "error": "query processing failed",
+                            "stdout": result.stdout,
+                            "stderr": result.stderr,
+                        },
+                    )
+                    return
+
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "status": "ok",
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "blockchain_state": self._load_blockchain_state(),
+                        "result": self._load_mobile_response(response_dir),
+                    },
+                )
+            return
+
         if self.path.startswith("/upload/"):
             request_id = self.path.split("/", 2)[2]
             payload = self._read_body()
