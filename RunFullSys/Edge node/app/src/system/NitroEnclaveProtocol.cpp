@@ -6,9 +6,9 @@
 #include <stdexcept>
 
 #ifdef __linux__
-#include <linux/vm_sockets.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <linux/vm_sockets.h>
 #include <unistd.h>
 #endif
 

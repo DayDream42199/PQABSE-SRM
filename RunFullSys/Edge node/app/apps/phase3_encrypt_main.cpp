@@ -1,5 +1,6 @@
 #include <iostream>
 
+#include "entities/NitroTeeClient.h"
 #include "entities/SoftwareTee.h"
 #include "phase1_setup.h"
 #include "phase3_encrypt.h"
@@ -12,6 +13,18 @@
 #include "system/ExperimentMetrics.h"
 #include "system/RuntimePaths.h"
 #include "system/TestScenario.h"
+
+namespace {
+
+abse_zkp::NitroTeeOptions LoadNitroOptions(const abse_zkp::CliArgs& cli) {
+    abse_zkp::NitroTeeOptions options;
+    options.enclave_cid = static_cast<std::uint32_t>(std::stoul(cli.Get("--nitro-cid", "16")));
+    options.port = static_cast<std::uint32_t>(std::stoul(cli.Get("--nitro-port", "5005")));
+    options.timeout_ms = std::stoi(cli.Get("--nitro-timeout-ms", "30000"));
+    return options;
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
     using namespace abse_zkp;
@@ -65,11 +78,27 @@ int main(int argc, char** argv) {
 
     SystemParams params{}; PK pk; MSK msk;
     if (!LoadPhase1Artifacts(params, pk, msk, AbseArtifactRoot().string())) { std::cerr << "Failed to load Phase 1 artifacts" << std::endl; return 2; }
+    const bool use_nitro = cli.Get("--tee-mode", "software") == "nitro";
+    const auto nitro_options = LoadNitroOptions(cli);
     SoftwareTee tee;
+    NitroTeeClient nitro_tee;
     CiphertextBundle bundle;
     const auto phase_start = Clock::now();
     const auto encrypt_start = Clock::now();
-    tee.CreateCiphertextBundle(params, pk, label, plaintext, keywords, logical_policy, "epoch-" + std::to_string(Blockchain.current_state.epoch), bundle);
+    if (use_nitro) {
+        nitro_tee.CreateCiphertextBundle(params,
+                                         pk,
+                                         msk,
+                                         label,
+                                         plaintext,
+                                         keywords,
+                                         logical_policy,
+                                         "epoch-" + std::to_string(Blockchain.current_state.epoch),
+                                         bundle,
+                                         nitro_options);
+    } else {
+        tee.CreateCiphertextBundle(params, pk, label, plaintext, keywords, logical_policy, "epoch-" + std::to_string(Blockchain.current_state.epoch), bundle);
+    }
     const double encrypt_bundle_ms = ElapsedMilliseconds(encrypt_start, Clock::now());
     const auto bundle_path = BundleBinaryPath(label);
     const auto write_start = Clock::now();

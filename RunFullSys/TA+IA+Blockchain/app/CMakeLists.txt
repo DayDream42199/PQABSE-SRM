@@ -46,8 +46,10 @@ set(MERGED_SOURCES
     src/system/Artifacts.cpp
     src/system/AuthTokenIO.cpp
     src/system/ExperimentMetrics.cpp
+    src/system/NitroEnclaveProtocol.cpp
     src/system/SearchBenchmark.cpp
     src/system/TestScenario.cpp
+    src/entities/NitroTeeClient.cpp
     src/entities/SoftwareTee.cpp
     src/entities/SearchGateway.cpp
     search_src/Search.cpp
@@ -98,5 +100,7 @@ add_executable(cs_process_query apps/cs_process_query_main.cpp)
 target_link_libraries(cs_process_query PRIVATE abse_zkp_core)
 add_executable(mdu_decrypt_response apps/mdu_decrypt_response_main.cpp)
 target_link_libraries(mdu_decrypt_response PRIVATE abse_zkp_core)
+add_executable(nitro_keygen_enclave_server apps/nitro_keygen_enclave_main.cpp)
+target_link_libraries(nitro_keygen_enclave_server PRIVATE abse_zkp_core)
 
 

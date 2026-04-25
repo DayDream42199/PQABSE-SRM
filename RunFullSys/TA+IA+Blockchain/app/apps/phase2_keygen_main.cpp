@@ -1,6 +1,7 @@
 #include <iostream>
 #include <random>
 
+#include "entities/NitroTeeClient.h"
 #include "entities/SoftwareTee.h"
 #include "phase2_keygen.h"
 #include "pq_src/IdentityAuthority.h"
@@ -15,6 +16,14 @@ int random_mod_q() {
     static thread_local std::mt19937_64 rng(std::random_device{}());
     std::uniform_int_distribution<int> dist(0, 12288);
     return dist(rng);
+}
+
+abse_zkp::NitroTeeOptions LoadNitroOptions(const abse_zkp::CliArgs& cli) {
+    abse_zkp::NitroTeeOptions options;
+    options.enclave_cid = static_cast<std::uint32_t>(std::stoul(cli.Get("--nitro-cid", "16")));
+    options.port = static_cast<std::uint32_t>(std::stoul(cli.Get("--nitro-port", "5005")));
+    options.timeout_ms = std::stoi(cli.Get("--nitro-timeout-ms", "30000"));
+    return options;
 }
 }
 
@@ -46,7 +55,10 @@ int main(int argc, char** argv) {
     if (!LoadPhase1Artifacts(params, pk, msk, AbseArtifactRoot().string())) { std::cerr << "Failed to load Phase 1 artifacts" << std::endl; return 1; }
     IdentityAuthority ia;
     Blockchain.sync_from_chain();
+    const bool use_nitro = cli.Get("--tee-mode", "software") == "nitro";
+    const auto nitro_options = LoadNitroOptions(cli);
     SoftwareTee tee;
+    NitroTeeClient nitro_tee;
     UserSecretKey user_key;
 
     if (refresh_existing) {
@@ -79,7 +91,19 @@ int main(int argc, char** argv) {
             return 7;
         }
         identity_secret = record.identity_secret;
-        tee.GenerateUserKey(params, pk, msk, gid, attrs, user_key, Blockchain.current_state.epoch, rekey_state.update_token_seed);
+        if (use_nitro) {
+            nitro_tee.GenerateUserKey(params,
+                                      pk,
+                                      msk,
+                                      gid,
+                                      attrs,
+                                      user_key,
+                                      Blockchain.current_state.epoch,
+                                      rekey_state.update_token_seed,
+                                      nitro_options);
+        } else {
+            tee.GenerateUserKey(params, pk, msk, gid, attrs, user_key, Blockchain.current_state.epoch, rekey_state.update_token_seed);
+        }
         if (!SaveUserSecretKey(params, user_key, record.user_key_path)) { std::cerr << "Failed to save refreshed user key" << std::endl; return 8; }
         record.local_epoch = Blockchain.current_state.epoch;
         record.attributes = user_key.attributes;
@@ -89,7 +113,11 @@ int main(int argc, char** argv) {
     }
 
     ia.register_user(gid, identity_secret);
-    tee.GenerateUserKey(params, pk, msk, gid, attrs, user_key, Blockchain.current_state.epoch, "");
+    if (use_nitro) {
+        nitro_tee.GenerateUserKey(params, pk, msk, gid, attrs, user_key, Blockchain.current_state.epoch, "", nitro_options);
+    } else {
+        tee.GenerateUserKey(params, pk, msk, gid, attrs, user_key, Blockchain.current_state.epoch, "");
+    }
     if (!SaveUserSecretKey(params, user_key, UserSecretKeyPath(gid).string())) { std::cerr << "Failed to save user key" << std::endl; return 10; }
     UserCredentialRecord record{gid, identity_secret, Blockchain.current_state.epoch, UserSecretKeyPath(gid).string(), user_key.attributes};
     if (!SaveUserCredentialRecord(record)) { std::cerr << "Failed to save user credential record" << std::endl; return 11; }

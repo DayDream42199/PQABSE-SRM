@@ -76,9 +76,13 @@ std::vector<EnclaveFilePacket> HandleRequest(const std::filesystem::path& temp_d
     if (gid_it == request_values.end()) {
         throw std::runtime_error("Missing gid in keygen request");
     }
-    const auto attributes = SplitCsv(request_values["attributes"]);
-    const int epoch = request_values.count("epoch") ? std::stoi(request_values["epoch"]) : 0;
-    const std::string update_seed = request_values.count("update_seed") ? request_values["update_seed"] : "";
+    const auto attributes_it = request_values.find("attributes");
+    const auto attributes = attributes_it != request_values.end() ? SplitCsv(attributes_it->second)
+                                                                  : std::vector<std::string>{};
+    const auto epoch_it = request_values.find("epoch");
+    const int epoch = epoch_it != request_values.end() ? std::stoi(epoch_it->second) : 0;
+    const auto update_seed_it = request_values.find("update_seed");
+    const std::string update_seed = update_seed_it != request_values.end() ? update_seed_it->second : "";
 
     SoftwareTee tee;
     UserSecretKey user_key;

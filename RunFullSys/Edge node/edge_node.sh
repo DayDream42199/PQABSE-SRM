@@ -10,6 +10,16 @@ CS_URL="${PQ_ABSE_CS_URL:-http://127.0.0.1:8083}"
 HTTP_HOST="${PQ_ABSE_HTTP_HOST:-0.0.0.0}"
 HTTP_PORT="${PQ_ABSE_EDGE_PORT:-8082}"
 
+tee_args=()
+if [[ "${PQ_ABSE_TEE_MODE:-software}" == "nitro" ]]; then
+  tee_args+=(
+    --tee-mode nitro
+    --nitro-cid "${PQ_ABSE_NITRO_CID:-16}"
+    --nitro-port "${PQ_ABSE_NITRO_PORT:-5005}"
+    --nitro-timeout-ms "${PQ_ABSE_NITRO_TIMEOUT_MS:-30000}"
+  )
+fi
+
 require_build() {
   if [[ ! -d "$BUILD_DIR" ]]; then
     echo "Missing build directory: $BUILD_DIR" >&2
@@ -36,7 +46,7 @@ sync_state_from_ta() {
 run_encrypt() {
   require_build
   local bundle="${1:?usage: edge_node.sh encrypt <scenario-bundle-name>}"
-  "$BUILD_DIR/phase3_encrypt" --scenario "$SCENARIO_PATH" --bundle "$bundle"
+  "$BUILD_DIR/phase3_encrypt" --scenario "$SCENARIO_PATH" --bundle "$bundle" "${tee_args[@]}"
 }
 
 serve_http() {
