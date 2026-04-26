@@ -51,13 +51,14 @@ run_encrypt() {
 
 run_encrypt_raw() {
   require_build
-  local owner_gid="${1:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
-  local label="${2:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
-  local plaintext="${3:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
-  local policy_type="${4:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
-  local threshold="${5:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
-  local keyword_csv="${6:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
-  local policy_attr_csv="${7:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>}"
+  local owner_gid="${1:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local label="${2:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local plaintext="${3:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local policy_type="${4:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local threshold="${5:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local keyword_csv="${6:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local policy_attr_csv="${7:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local policy_expression="${8:-}"
 
   local args=(
     "$BUILD_DIR/phase3_encrypt"
@@ -83,6 +84,10 @@ run_encrypt_raw() {
     [[ -n "$item" ]] && args+=(--policy-attr "$item")
   done
 
+  if [[ -n "$policy_expression" ]]; then
+    args+=(--policy-expression "$policy_expression")
+  fi
+
   args+=("${tee_args[@]}")
   "${args[@]}"
 }
@@ -101,7 +106,7 @@ case "$cmd" in
   encrypt-raw) shift; run_encrypt_raw "$@" ;;
   serve-http) serve_http "$@" ;;
   *)
-    echo "Usage: $0 {sync-state|encrypt <bundle>|encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv>|serve-http [host] [port]}" >&2
+    echo "Usage: $0 {sync-state|encrypt <bundle>|encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]|serve-http [host] [port]}" >&2
     exit 1
     ;;
 esac

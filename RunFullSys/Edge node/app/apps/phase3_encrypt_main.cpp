@@ -64,11 +64,16 @@ int main(int argc, char** argv) {
         plaintext = cli.Require("--plaintext");
         keywords = cli.GetAll("--keyword");
         if (keywords.empty()) keywords = {"default"};
-        const std::string policy_type = cli.Get("--policy-type", "and");
-        auto policy_attrs = cli.GetAll("--policy-attr");
-        if (policy_attrs.empty()) policy_attrs = {"default"};
-        const std::size_t threshold = static_cast<std::size_t>(std::stoull(cli.Get("--threshold", "1")));
-        logical_policy = BuildLogicalPolicyFromParts(policy_type, policy_attrs, threshold);
+        const std::string policy_expression = cli.Get("--policy-expression");
+        if (!policy_expression.empty()) {
+            logical_policy = BuildLogicalPolicyFromExpression(policy_expression);
+        } else {
+            const std::string policy_type = cli.Get("--policy-type", "and");
+            auto policy_attrs = cli.GetAll("--policy-attr");
+            if (policy_attrs.empty()) policy_attrs = {"default"};
+            const std::size_t threshold = static_cast<std::size_t>(std::stoull(cli.Get("--threshold", "1")));
+            logical_policy = BuildLogicalPolicyFromParts(policy_type, policy_attrs, threshold);
+        }
     }
 
     IdentityAuthority ia;

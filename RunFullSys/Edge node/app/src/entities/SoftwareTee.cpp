@@ -1,5 +1,6 @@
 #include "entities/SoftwareTee.h"
 
+#include <algorithm>
 #include <cctype>
 #include <stdexcept>
 
@@ -83,6 +84,24 @@ private:
         return children;
     }
 
+    bool TryParseKOfNKeyword(const std::string& keyword, std::size_t& threshold, std::size_t& expected_children) const {
+        const auto marker = keyword.find("-OF-");
+        if (marker == std::string::npos || marker == 0 || marker + 4 >= keyword.size()) {
+            return false;
+        }
+
+        const std::string threshold_text = keyword.substr(0, marker);
+        const std::string child_count_text = keyword.substr(marker + 4);
+        if (!std::all_of(threshold_text.begin(), threshold_text.end(), [](unsigned char ch) { return std::isdigit(ch); }) ||
+            !std::all_of(child_count_text.begin(), child_count_text.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+            return false;
+        }
+
+        threshold = static_cast<std::size_t>(std::stoull(threshold_text));
+        expected_children = static_cast<std::size_t>(std::stoull(child_count_text));
+        return true;
+    }
+
     LogicalPolicy ParseExpression() {
         const std::string identifier = ParseIdentifier();
         SkipWhitespace();
@@ -110,6 +129,16 @@ private:
             Expect(',');
             const auto children = ParseExpressionList();
             Expect(')');
+            return MakeThresholdPolicy(threshold, children);
+        }
+        std::size_t threshold = 0;
+        std::size_t expected_children = 0;
+        if (TryParseKOfNKeyword(keyword, threshold, expected_children)) {
+            const auto children = ParseExpressionList();
+            Expect(')');
+            if (children.size() != expected_children) {
+                throw std::invalid_argument("threshold policy child count does not match expression");
+            }
             return MakeThresholdPolicy(threshold, children);
         }
         if (keyword == "ATTR") {

@@ -121,6 +121,7 @@ class EdgeHandler(BaseHTTPRequestHandler):
             label = (payload.get("label") or payload.get("bundle_label") or "").strip()
             plaintext = payload.get("plaintext") or ""
             keywords = payload.get("keywords") or []
+            policy_expression = (payload.get("policy_expression") or "").strip()
             policy_type = (payload.get("policy_type") or "and").strip()
             threshold = payload.get("threshold", 1)
             policy_attrs = payload.get("policy_attrs") or payload.get("policy_attributes") or []
@@ -137,7 +138,11 @@ class EdgeHandler(BaseHTTPRequestHandler):
             if not isinstance(keywords, list) or not all(isinstance(item, str) and item.strip() for item in keywords):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "keywords must be a non-empty string list"})
                 return
-            if not isinstance(policy_attrs, list) or not all(isinstance(item, str) and item.strip() for item in policy_attrs):
+            if policy_expression:
+                if not isinstance(policy_expression, str):
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "policy_expression must be a string"})
+                    return
+            elif not isinstance(policy_attrs, list) or not all(isinstance(item, str) and item.strip() for item in policy_attrs):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "policy_attrs must be a non-empty string list"})
                 return
 
@@ -155,6 +160,7 @@ class EdgeHandler(BaseHTTPRequestHandler):
                 str(threshold),
                 ",".join(item.strip() for item in keywords),
                 ",".join(item.strip() for item in policy_attrs),
+                policy_expression,
             ]
             encrypt_result = self._run_script(*args)
             if encrypt_result.returncode != 0:
