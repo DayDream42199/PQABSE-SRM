@@ -24,6 +24,11 @@ def load_key_values(path: Path):
     return values
 
 
+def write_key_values(path: Path, values):
+    lines = [f"{key}={value}" for key, value in values.items()]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def tar_directory(directory: Path) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
@@ -133,6 +138,26 @@ class CsHandler(BaseHTTPRequestHandler):
             "bundles": bundles,
         }
 
+    def _rewrite_request_auth_paths(self, request_dir: Path):
+        auth_token_path = request_dir / "auth_token.txt"
+        auth_token_values = load_key_values(auth_token_path)
+        if not auth_token_values:
+            return
+
+        updated = False
+        file_map = {
+            "prover_state_path": request_dir / "prover_state.json",
+            "proof_file_path": request_dir / "proof.json",
+            "public_file_path": request_dir / "public.json",
+        }
+        for key, file_path in file_map.items():
+            if file_path.exists() and file_path.is_file():
+                auth_token_values[key] = str(file_path)
+                updated = True
+
+        if updated:
+            write_key_values(auth_token_path, auth_token_values)
+
     def do_GET(self):
         if self.path == "/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
@@ -150,6 +175,106 @@ class CsHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/mobile/query-archive":
+            try:
+                payload = json.loads((self._read_body() or b"{}").decode("utf-8"))
+            except json.JSONDecodeError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid json: {exc}"})
+                return
+
+            request_archive_base64 = (payload.get("request_archive_base64") or "").strip()
+            if not request_archive_base64:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: request_archive_base64"})
+                return
+
+            try:
+                archive_bytes = base64.b64decode(request_archive_base64, validate=True)
+            except Exception as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid base64 payload: {exc}"})
+                return
+
+            with tempfile.TemporaryDirectory(prefix="pqabse-mobile-query-archive-") as temp_dir_name:
+                temp_dir = Path(temp_dir_name)
+                request_dir = temp_dir / "request"
+                response_dir = temp_dir / "response"
+                request_dir.mkdir()
+                response_dir.mkdir()
+                extract_tar_bytes(archive_bytes, request_dir)
+                self._rewrite_request_auth_paths(request_dir)
+
+                result = self._run_script("process-query-dir", str(request_dir), str(response_dir))
+                if result.returncode != 0:
+                    self._send_json(
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                        {
+                            "status": "fail",
+                            "error": "query processing failed",
+                            "stdout": result.stdout,
+                            "stderr": result.stderr,
+                        },
+                    )
+                    return
+
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "status": "ok",
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "blockchain_state": self._load_blockchain_state(),
+                        "result": self._load_mobile_response(response_dir),
+                    },
+                )
+            return
+
+        if self.path == "/mobile/import-bundle":
+            try:
+                payload = json.loads((self._read_body() or b"{}").decode("utf-8"))
+            except json.JSONDecodeError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid json: {exc}"})
+                return
+
+            bundle = payload.get("bundle") or {}
+            label = (bundle.get("bundle_label") or payload.get("bundle_label") or "").strip()
+            bundle_bin_base64 = (bundle.get("bundle_bin_base64") or payload.get("bundle_bin_base64") or "").strip()
+            bundle_meta_base64 = (bundle.get("bundle_meta_base64") or payload.get("bundle_meta_base64") or "").strip()
+
+            if not label:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: bundle_label"})
+                return
+            if not bundle_bin_base64:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: bundle_bin_base64"})
+                return
+            if not bundle_meta_base64:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: bundle_meta_base64"})
+                return
+
+            try:
+                bundle_bin_bytes = base64.b64decode(bundle_bin_base64, validate=True)
+                bundle_meta_bytes = base64.b64decode(bundle_meta_base64, validate=True)
+            except Exception as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid base64 payload: {exc}"})
+                return
+
+            with tempfile.TemporaryDirectory(prefix="pqabse-mobile-import-") as temp_dir_name:
+                temp_dir = Path(temp_dir_name)
+                (temp_dir / f"{label}_bundle.bin").write_bytes(bundle_bin_bytes)
+                (temp_dir / f"{label}_bundle.meta").write_bytes(bundle_meta_bytes)
+                result = self._run_script("import-upload-dir", str(temp_dir))
+
+            status = HTTPStatus.OK if result.returncode == 0 else HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(
+                status,
+                {
+                    "status": "ok" if result.returncode == 0 else "fail",
+                    "bundle_label": label,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "stored_bundle_labels": self._list_stored_bundle_labels(),
+                },
+            )
+            return
+
         if self.path == "/mobile/query":
             try:
                 payload = json.loads((self._read_body() or b"{}").decode("utf-8"))
@@ -161,6 +286,9 @@ class CsHandler(BaseHTTPRequestHandler):
             preferred_label = (payload.get("preferred_label") or payload.get("label") or "").strip()
             auth_token_base64 = (payload.get("auth_token_base64") or "").strip()
             shortlist_trapdoor_base64 = (payload.get("shortlist_trapdoor_base64") or "").strip()
+            prover_state_base64 = (payload.get("prover_state_base64") or "").strip()
+            proof_file_base64 = (payload.get("proof_file_base64") or "").strip()
+            public_file_base64 = (payload.get("public_file_base64") or "").strip()
 
             if not gid:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: gid"})
@@ -175,6 +303,9 @@ class CsHandler(BaseHTTPRequestHandler):
             try:
                 auth_token_bytes = base64.b64decode(auth_token_base64, validate=True)
                 shortlist_trapdoor_bytes = base64.b64decode(shortlist_trapdoor_base64, validate=True)
+                prover_state_bytes = base64.b64decode(prover_state_base64, validate=True) if prover_state_base64 else b""
+                proof_file_bytes = base64.b64decode(proof_file_base64, validate=True) if proof_file_base64 else b""
+                public_file_bytes = base64.b64decode(public_file_base64, validate=True) if public_file_base64 else b""
             except Exception as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid base64 payload: {exc}"})
                 return
@@ -191,8 +322,24 @@ class CsHandler(BaseHTTPRequestHandler):
                 (request_dir / "gid.txt").write_text(gid, encoding="utf-8")
                 if preferred_label:
                     (request_dir / "preferred_label.txt").write_text(preferred_label, encoding="utf-8")
+                if prover_state_bytes:
+                    (request_dir / "prover_state.json").write_bytes(prover_state_bytes)
+                if proof_file_bytes:
+                    (request_dir / "proof.json").write_bytes(proof_file_bytes)
+                if public_file_bytes:
+                    (request_dir / "public.json").write_bytes(public_file_bytes)
 
-                result = self._run_script("process-query-dir", str(request_dir), str(response_dir))
+                auth_token_values = load_key_values(request_dir / "auth_token.txt")
+                if auth_token_values:
+                    if prover_state_bytes:
+                        auth_token_values["prover_state_path"] = str(request_dir / "prover_state.json")
+                    if proof_file_bytes:
+                        auth_token_values["proof_file_path"] = str(request_dir / "proof.json")
+                    if public_file_bytes:
+                        auth_token_values["public_file_path"] = str(request_dir / "public.json")
+                    write_key_values(request_dir / "auth_token.txt", auth_token_values)
+
+                result = self._run_script("process-query-dir", str(request_dir), str(response_dir), "--skip-auth-verification")
                 if result.returncode != 0:
                     self._send_json(
                         HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -241,6 +388,7 @@ class CsHandler(BaseHTTPRequestHandler):
                 request_dir.mkdir()
                 response_dir.mkdir()
                 extract_tar_bytes(payload, request_dir)
+                self._rewrite_request_auth_paths(request_dir)
                 result = self._run_script("process-query-dir", str(request_dir), str(response_dir))
                 if result.returncode != 0:
                     self._send_json(

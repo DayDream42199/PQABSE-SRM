@@ -19,7 +19,9 @@ if (args.length !== 2 && args.length !== 6) {
 const [publicFileRaw, proofFileRaw, expectedRegistrationRoot, expectedRevocationRoot, expectedNonce, expectedIssuedAt] = args;
 const publicFile = path.resolve(publicFileRaw);
 const proofFile = path.resolve(proofFileRaw);
-const vkeyFile = path.join(repoRoot, "zk", "build", "setup", "verification_key.json");
+const vkeyFile = process.env.PQ_ABSE_VERIFY_KEY_PATH
+    ? path.resolve(process.env.PQ_ABSE_VERIFY_KEY_PATH)
+    : path.join(repoRoot, "zk", "build", "setup", "verification_key.json");
 
 for (const requiredFile of [publicFile, proofFile, vkeyFile]) {
     if (!fs.existsSync(requiredFile)) {

@@ -73,8 +73,9 @@ process_query_dir() {
   require_build
   local req_dir="${1:?}"
   local response_dir="${2:?}"
+  shift 2
   sync_state_from_ta
-  "$BUILD_DIR/cs_process_query" --request-dir "$req_dir" --response-dir "$response_dir"
+  "$BUILD_DIR/cs_process_query" --request-dir "$req_dir" --response-dir "$response_dir" "$@"
 }
 
 serve_http() {
@@ -88,7 +89,7 @@ cmd="${1:-}"
 case "$cmd" in
   sync-state) sync_state_from_ta ;;
   import-upload-dir) import_upload_dir "${2:?}" ;;
-  process-query-dir) process_query_dir "${2:?}" "${3:?}" ;;
+  process-query-dir) shift; process_query_dir "$@" ;;
   serve-http) serve_http "$@" ;;
   *)
     echo "Usage: $0 {sync-state|import-upload-dir <dir>|process-query-dir <request-dir> <response-dir>|serve-http [host] [port]}" >&2

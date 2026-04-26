@@ -7,6 +7,8 @@ BUILD_DIR="$APP_DIR/build-wsl"
 SCENARIO_PATH="$APP_DIR/config/test_demo_1.conf"
 TA_URL="${PQ_ABSE_TA_URL:-http://127.0.0.1:8081}"
 CS_URL="${PQ_ABSE_CS_URL:-http://127.0.0.1:8083}"
+HTTP_HOST="${PQ_ABSE_HTTP_HOST:-0.0.0.0}"
+HTTP_PORT="${PQ_ABSE_MDU_PORT:-8084}"
 
 ensure_runtime_dirs() {
   mkdir -p "$APP_DIR/runtime/service/requests" "$APP_DIR/runtime/service/responses" "$APP_DIR/runtime/users" "$APP_DIR/runtime/state/update_tokens"
@@ -143,6 +145,13 @@ wait_response() {
   [[ -f "$APP_DIR/runtime/service/responses/$id/exact_match_count.txt" ]]
 }
 
+serve_http() {
+  exec python3 "$ROLE_DIR/http_server.py" \
+    --host "${2:-$HTTP_HOST}" \
+    --port "${3:-$HTTP_PORT}" \
+    --role-dir "$ROLE_DIR"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   sync-state) sync_state_from_ta ;;
@@ -152,8 +161,9 @@ case "$cmd" in
   collect-response) collect_response "${2:?}" "${3:?}" ;;
   wait-response) wait_response "${2:?}" ;;
   search) search_and_decrypt "${2:?}" "${3:-}" ;;
+  serve-http) serve_http "$@" ;;
   *)
-    echo "Usage: $0 {sync-state|sync-users|refresh <user>|submit-search <query> [id]|collect-response <gid> <id>|wait-response <id>|search <query> [id]}" >&2
+    echo "Usage: $0 {sync-state|sync-users|refresh <user>|submit-search <query> [id]|collect-response <gid> <id>|wait-response <id>|search <query> [id]|serve-http [host] [port]}" >&2
     exit 1
     ;;
 esac

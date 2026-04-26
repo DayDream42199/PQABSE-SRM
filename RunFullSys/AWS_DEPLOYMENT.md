@@ -17,6 +17,23 @@ The intended sensitive roles are:
 
 `CS` can run on a normal EC2 instance.
 
+## Current status
+
+The repo already implements the HTTP role split required for EC2:
+
+- `MDO/mobile owner -> Edge`
+- `Edge -> returns ciphertext bundle`
+- `MDO/mobile owner -> CS import`
+- `MDU/mobile user -> CS query`
+- `MDU/mobile user -> local decrypt`
+
+The repo also already contains a Nitro-backed TEE path for:
+
+- `TA+IA+Blockchain` trusted key generation
+- `Edge node` trusted ciphertext-bundle creation
+
+See [AWS_NITRO_TEE.md](./AWS_NITRO_TEE.md) for the parent/enclave flags and binaries.
+
 ## Transport model
 
 `RunFullSys` now uses HTTP between roles.
@@ -258,6 +275,65 @@ Then run the demo flow:
 
 1. MDO uploads with `bash ./mdo.sh encrypt-upload demo1 demo_encrypt_1`
 2. MDU searches with `bash ./mdu.sh search bob_before_revoke demo_search_before`
+
+## Benchmarking the EC2/mobile flow
+
+The repo now includes:
+
+- `RunFullSys/benchmark_ec2_mobile_flow.py`
+
+This script measures the live HTTP flow against deployed services:
+
+- owner/mobile-to-Edge encrypt roundtrip
+- local MDU trapdoor generation
+- CS query roundtrip
+- local MDU decrypt time
+
+The benchmark writes:
+
+- per-run CSV: `RunFullSys/experiment_results/ec2_mobile_flow_runs.csv`
+- averages CSV: `RunFullSys/experiment_results/ec2_mobile_flow_avg.csv`
+
+Default benchmark points:
+
+- `20`
+- `300`
+- `500`
+- `1000`
+
+Default repetitions:
+
+- `5`
+
+Run it from a client host that has the `RunFullSys/MDU` folder built locally:
+
+```bash
+cd /srv/pq_abse/RunFullSys
+python3 ./benchmark_ec2_mobile_flow.py \
+  --ta-url http://TA_HOST:8081 \
+  --edge-url http://EDGE_HOST:8082 \
+  --cs-url http://CS_HOST:8083
+```
+
+Notes:
+
+- The script registers a fresh owner and user per run.
+- It sends the owner plaintext/keywords to `Edge /mobile/encrypt`.
+- It imports the returned bundle into `CS`.
+- It prepares the query locally with the MDU binaries.
+- It submits the request archive to `CS /query/<id>`.
+- It decrypts locally and records the decrypt timing.
+
+If you want different keyword points or repetition counts:
+
+```bash
+python3 ./benchmark_ec2_mobile_flow.py \
+  --ta-url http://TA_HOST:8081 \
+  --edge-url http://EDGE_HOST:8082 \
+  --cs-url http://CS_HOST:8083 \
+  --keyword-counts 20 300 500 1000 \
+  --runs 5
+```
 3. TA revokes Alice with `bash ./ta_ia_blockchain.sh revoke revoke_alice`
 4. MDU refreshes Bob with `bash ./mdu.sh refresh Bob`
 5. MDU searches again with `bash ./mdu.sh search bob_after_revoke demo_search_after`

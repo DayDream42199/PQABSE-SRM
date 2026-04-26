@@ -1,6 +1,9 @@
 #include <algorithm>
+#include <array>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <openssl/sha.h>
 #include <sstream>
 
 #include "entities/SearchGateway.h"
@@ -18,6 +21,42 @@
 namespace {
 
 using namespace abse_zkp;
+
+std::array<unsigned char, 32> HashUpdateMaterial(const std::string& updateMaterial) {
+    std::array<unsigned char, 32> digest{};
+    if (updateMaterial.empty()) {
+        return digest;
+    }
+    SHA256(reinterpret_cast<const unsigned char*>(updateMaterial.data()), updateMaterial.size(), digest.data());
+    return digest;
+}
+
+std::array<unsigned char, 16> DeriveReencryptedFileNonce(const std::array<unsigned char, 16>& currentNonce,
+                                                         const CloudRekeyState& rekeyState,
+                                                         const std::string& bundleLabel,
+                                                         int targetEpoch) {
+    std::string input = rekeyState.re_encryption_key + "|" + rekeyState.revoked_user_gid + "|" +
+                        bundleLabel + "|" + std::to_string(targetEpoch);
+    input.append(reinterpret_cast<const char*>(currentNonce.data()), currentNonce.size());
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(input.data()), input.size(), digest);
+    std::array<unsigned char, 16> nextNonce{};
+    std::copy(digest, digest + nextNonce.size(), nextNonce.begin());
+    return nextNonce;
+}
+
+bool NeedsLazyReencryption(const StoredBundleRecord& record,
+                           const CiphertextBundle& bundle,
+                           const CloudRekeyState& rekeyState,
+                           int currentEpoch) {
+    if (record.version_tag.epoch != currentEpoch) {
+        return true;
+    }
+    if (currentEpoch == 0 || rekeyState.update_token_seed.empty()) {
+        return false;
+    }
+    return bundle.ctk.update_seed_commitment != HashUpdateMaterial(rekeyState.update_token_seed);
+}
 
 std::filesystem::path SearchIndexPathForEpoch(int epoch) {
     return SearchArtifactRoot() / ("bitmap_index_epoch_" + std::to_string(epoch) + ".bin");
@@ -60,9 +99,25 @@ int main(int argc, char** argv) {
     EnsureRuntimeDirectories();
     CliArgs cli(argc, argv);
     const auto candidate_timing_out = cli.Get("--candidate-timing-out");
+    const bool skip_auth_verification = cli.HasFlag("--skip-auth-verification");
 
     const auto request_dir = std::filesystem::path(cli.Require("--request-dir"));
     const auto response_dir = std::filesystem::path(cli.Require("--response-dir"));
+    const auto verification_key_override = request_dir / "verification_key.json";
+
+    if (std::filesystem::exists(verification_key_override)) {
+#ifdef _WIN32
+        _putenv_s("PQ_ABSE_VERIFY_KEY_PATH", verification_key_override.string().c_str());
+#else
+        setenv("PQ_ABSE_VERIFY_KEY_PATH", verification_key_override.string().c_str(), 1);
+#endif
+    } else {
+#ifdef _WIN32
+        _putenv_s("PQ_ABSE_VERIFY_KEY_PATH", "");
+#else
+        unsetenv("PQ_ABSE_VERIFY_KEY_PATH");
+#endif
+    }
 
     SystemParams params{};
     PK pk;
@@ -83,7 +138,7 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to load auth token" << std::endl;
         return 2;
     }
-    if (!gateway.VerifyAuthToken(token)) {
+    if (!skip_auth_verification && !gateway.VerifyAuthToken(token)) {
         std::cerr << "Authentication token verification failed" << std::endl;
         return 3;
     }
@@ -135,14 +190,26 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (record.version_tag.epoch != Blockchain.current_state.epoch &&
-            !rekey_state.re_encryption_key.empty() &&
-            rekey_state.epoch == Blockchain.current_state.epoch) {
+        const bool epochStale = record.version_tag.epoch != Blockchain.current_state.epoch;
+        if (NeedsLazyReencryption(record, bundle, rekey_state, Blockchain.current_state.epoch)) {
+            if (rekey_state.re_encryption_key.empty() || rekey_state.epoch != Blockchain.current_state.epoch) {
+                std::cerr << "Bundle " << label << " needs re-encryption but no valid rekey material is available" << std::endl;
+                continue;
+            }
+            if (epochStale) {
+                bundle.file_nonce = DeriveReencryptedFileNonce(bundle.file_nonce,
+                                                               rekey_state,
+                                                               record.bundle_label,
+                                                               Blockchain.current_state.epoch);
+            }
             ReEncryptCiphertextBundle(params,
                                       bundle,
                                       "epoch-" + std::to_string(Blockchain.current_state.epoch),
                                       rekey_state.re_encryption_key,
                                       rekey_state.update_token_seed);
+            if (epochStale) {
+                bundle.secure_index = BuildSecureIndex(params, bundle.keyword_set, bundle.file_nonce);
+            }
             record.version_tag = Blockchain.current_state;
             record.is_reencrypted = true;
             SaveCiphertextBundle(params, bundle, record.bundle_path);

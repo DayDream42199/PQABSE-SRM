@@ -60,10 +60,93 @@ run_refresh() {
   "$BUILD_DIR/phase2_keygen" --scenario "$SCENARIO_PATH" --user "$user" --refresh-existing "${tee_args[@]}"
 }
 
+run_refresh_raw() {
+  require_build
+  local gid="${1:?usage: ta_ia_blockchain.sh refresh-raw <gid>}"
+  local cred_path="$APP_DIR/runtime/users/${gid}.cred"
+  if [[ ! -f "$cred_path" ]]; then
+    echo "Missing credential record for $gid" >&2
+    exit 1
+  fi
+
+  mapfile -t attrs < <(python3 - "$cred_path" <<'PY'
+from pathlib import Path
+import sys
+
+values = {}
+for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    if "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    values[key.strip()] = value.strip()
+
+for attr in values.get("attributes", "").split(","):
+    attr = attr.strip()
+    if attr:
+        print(attr)
+PY
+)
+
+  local args=("$BUILD_DIR/phase2_keygen" --gid "$gid" --refresh-existing)
+  local attr
+  for attr in "${attrs[@]}"; do
+    args+=(--attr "$attr")
+  done
+  args+=("${tee_args[@]}")
+  "${args[@]}"
+}
+
 run_revoke() {
   require_build
   local revocation="${1:?usage: ta_ia_blockchain.sh revoke <scenario-revocation-name>}"
   "$BUILD_DIR/phase5_revoke" --scenario "$SCENARIO_PATH" --revocation "$revocation"
+}
+
+run_revoke_raw() {
+  require_build
+  local gid="${1:?usage: ta_ia_blockchain.sh revoke-raw <gid>}"
+  "$BUILD_DIR/phase5_revoke" --gid "$gid"
+}
+
+prepare_query_dir() {
+  require_build
+  local gid="${1:?usage: ta_ia_blockchain.sh prepare-query-dir <gid> <out-dir> [label] <keyword> [keyword ...]}"
+  local out_dir="${2:?usage: ta_ia_blockchain.sh prepare-query-dir <gid> <out-dir> [label] <keyword> [keyword ...]}"
+  shift 2
+
+  local label=""
+  if [[ "$#" -gt 0 ]]; then
+    label="${1:-}"
+    shift
+  fi
+  if [[ "$#" -eq 0 ]]; then
+    echo "prepare-query-dir requires at least one keyword" >&2
+    exit 1
+  fi
+
+  local args=("$BUILD_DIR/mdu_prepare_query" --gid "$gid" --out-dir "$out_dir")
+  if [[ -n "$label" ]]; then
+    args+=(--label "$label")
+  fi
+
+  local keyword
+  for keyword in "$@"; do
+    args+=(--query-keyword "$keyword")
+  done
+  "${args[@]}"
+}
+
+prepare_auth_dir() {
+  require_build
+  local gid="${1:?usage: ta_ia_blockchain.sh prepare-auth-dir <gid> <out-dir> [label]}"
+  local out_dir="${2:?usage: ta_ia_blockchain.sh prepare-auth-dir <gid> <out-dir> [label]}"
+  local label="${3:-}"
+
+  local args=("$BUILD_DIR/mdu_prepare_auth" --gid "$gid" --out-dir "$out_dir")
+  if [[ -n "$label" ]]; then
+    args+=(--label "$label")
+  fi
+  "${args[@]}"
 }
 
 serve_http() {
@@ -79,10 +162,14 @@ case "$cmd" in
   register) run_register "${2:-}" ;;
   register-raw) shift; run_register_raw "$@" ;;
   refresh) run_refresh "${2:-}" ;;
+  refresh-raw) run_refresh_raw "${2:-}" ;;
   revoke) run_revoke "${2:-}" ;;
+  revoke-raw) run_revoke_raw "${2:-}" ;;
+  prepare-query-dir) shift; prepare_query_dir "$@" ;;
+  prepare-auth-dir) shift; prepare_auth_dir "$@" ;;
   serve-http) serve_http "$@" ;;
   *)
-    echo "Usage: $0 {setup|register <user>|register-raw <gid> <attr> [attr ...]|refresh <user>|revoke <revocation>|serve-http [host] [port]}" >&2
+    echo "Usage: $0 {setup|register <user>|register-raw <gid> <attr> [attr ...]|refresh <user>|refresh-raw <gid>|revoke <revocation>|revoke-raw <gid>|prepare-query-dir <gid> <out-dir> [label] <keyword> [keyword ...]|prepare-auth-dir <gid> <out-dir> [label]|serve-http [host] [port]}" >&2
     exit 1
     ;;
 esac
