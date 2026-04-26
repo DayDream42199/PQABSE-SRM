@@ -81,6 +81,17 @@ int main(int argc, char** argv) {
         if (!ia.get_user_record(gid, user_record)) { std::cerr << "User is not registered with IA: " << gid << std::endl; return 2; }
         if (user_record.is_revoked) { std::cerr << "Cannot refresh key for revoked user " << gid << std::endl; return 3; }
 
+        UserCredentialRecord record;
+        if (!LoadUserCredentialRecord(gid, record)) {
+            std::cerr << "Failed to load credential record for " << gid << std::endl;
+            return 7;
+        }
+        identity_secret = record.identity_secret;
+        if (record.local_epoch >= Blockchain.current_state.epoch) {
+            std::cout << "User key already current for " << gid << std::endl;
+            return 0;
+        }
+
         CloudRekeyState rekey_state;
         if (!LoadCloudRekeyState(rekey_state) || rekey_state.epoch != Blockchain.current_state.epoch) {
             std::cerr << "Missing current cloud rekey state for epoch " << Blockchain.current_state.epoch << std::endl;
@@ -100,12 +111,6 @@ int main(int argc, char** argv) {
             return 6;
         }
 
-        UserCredentialRecord record;
-        if (!LoadUserCredentialRecord(gid, record)) {
-            std::cerr << "Failed to load credential record for " << gid << std::endl;
-            return 7;
-        }
-        identity_secret = record.identity_secret;
         const auto keygen_start = Clock::now();
         if (use_nitro) {
             nitro_tee.GenerateUserKey(params,
