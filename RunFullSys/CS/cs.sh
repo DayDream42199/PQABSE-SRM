@@ -42,18 +42,24 @@ PY
 
 sync_state_from_ta() {
   local archive
+  local user_archive
   local sync_dir
   archive="$(mktemp)"
+  user_archive="$(mktemp)"
   sync_dir="$(mktemp -d)"
   curl -fsS "$TA_URL/state/latest.tar.gz" -o "$archive"
+  curl -fsS "$TA_URL/users/all.tar.gz" -o "$user_archive"
   tar -xzf "$archive" -C "$sync_dir"
+  tar -xzf "$user_archive" -C "$sync_dir"
   mkdir -p "$APP_DIR/runtime"
-  rm -rf "$APP_DIR/runtime/abse" "$APP_DIR/runtime/state" "$APP_DIR/runtime/cloud"
+  rm -rf "$APP_DIR/runtime/abse" "$APP_DIR/runtime/state" "$APP_DIR/runtime/cloud" "$APP_DIR/runtime/users"
   [[ -d "$sync_dir/abse" ]] && cp -a "$sync_dir/abse" "$APP_DIR/runtime/"
   [[ -d "$sync_dir/state" ]] && cp -a "$sync_dir/state" "$APP_DIR/runtime/"
   [[ -d "$sync_dir/cloud" ]] && cp -a "$sync_dir/cloud" "$APP_DIR/runtime/"
+  [[ -d "$sync_dir/users" ]] && cp -a "$sync_dir/users" "$APP_DIR/runtime/"
   rm -rf "$sync_dir"
   rm -f "$archive"
+  rm -f "$user_archive"
 }
 
 import_upload_dir() {
