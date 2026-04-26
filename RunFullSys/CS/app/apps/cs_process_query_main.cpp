@@ -149,6 +149,12 @@ int main(int argc, char** argv) {
         return 4;
     }
 
+    UserCredentialRecord user_record;
+    if (!LoadUserCredentialRecord(token.user_gid, user_record)) {
+        std::cerr << "Failed to load user credential record for " << token.user_gid << std::endl;
+        return 4;
+    }
+
     const auto preferred_label = cli.Get("--preferred-label").empty()
         ? [&]() {
               std::string value;
@@ -220,6 +226,9 @@ int main(int argc, char** argv) {
         if (!Match(bundle, shortlist_trapdoor, matched_keywords)) {
             continue;
         }
+        if (!PolicySatisfied(user_record.attributes, bundle.logical_policy)) {
+            continue;
+        }
 
         const auto response_bundle_path = response_dir / "bundles" / (label + "_bundle.bin");
         const auto response_meta_path = response_dir / "bundles" / (label + "_bundle.meta");
@@ -228,7 +237,7 @@ int main(int argc, char** argv) {
         ++exact_match_count;
     }
 
-    WriteTextFile(response_dir / "candidate_count.txt", std::to_string(candidate_labels.size()));
+    WriteTextFile(response_dir / "candidate_count.txt", std::to_string(exact_match_count));
     WriteTextFile(response_dir / "exact_match_count.txt", std::to_string(exact_match_count));
     WriteTextFile(response_dir / "epoch.txt", std::to_string(Blockchain.current_state.epoch));
     if (!candidate_timing_out.empty()) {
