@@ -57,8 +57,13 @@ run_encrypt_raw() {
   local policy_type="${4:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
   local threshold="${5:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
   local keyword_csv="${6:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
-  local policy_attr_csv="${7:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local policy_attr_csv="${7-}"
   local policy_expression="${8:-}"
+
+  if [[ -z "$policy_expression" && -z "$policy_attr_csv" ]]; then
+    echo "usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]" >&2
+    return 1
+  fi
 
   local args=(
     "$BUILD_DIR/phase3_encrypt"
