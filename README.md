@@ -80,3 +80,65 @@ Before connecting to AWS, secure your downloaded `.pem` key file using WSL.
 cd ~
 chmod 400 <Your_key>.pem
 ```
+
+---
+
+### 1. Universal Server Preparation (Run on ALL 3 Instances)
+Because all three nodes rely on the same heavy cryptographic libraries (OpenFHE, LibOQS) and Zero-Knowledge compilers (Circom), you must run this baseline setup on every single instance before downloading the project code.
+SSH into your instance:
+```bash
+ssh -o ServerAliveInterval=60 -i <Your_key>.pem ec2-user@<Instance_Public_IP>
+```
+(Type yes when prompted to confirm the connection).
+Once logged in, copy and paste this entire block to install all dependencies. Note: Compiling OpenFHE will take 10-30 minutes. Let it run until completion.
+```bash
+# 1. Install OS Packages and Build Tools
+sudo dnf update -y
+sudo dnf -y install --allowerasing \
+  git cmake ninja-build gcc gcc-c++ make \
+  python3 python3-pip nodejs npm \
+  openssl-devel wget curl tar gzip unzip jq which patch perl
+
+# 2. Configure Global Paths
+echo 'export CMAKE_PREFIX_PATH=/usr/local:/usr/local/lib64:/usr/local/lib:$CMAKE_PREFIX_PATH' >> ~/.bashrc
+echo 'export CPLUS_INCLUDE_PATH=/usr/local/include/openfhe/core:/usr/local/include/openfhe/pke:$CPLUS_INCLUDE_PATH' >> ~/.bashrc
+echo 'export LIBRARY_PATH=/usr/local/lib64:/usr/local/lib:$LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+# 3. Install Modern Rust-based Circom
+if ! command -v circom >/dev/null 2>&1 || ! circom --version | grep -q "2."; then
+  sudo npm uninstall -g circom 2>/dev/null
+  wget [https://github.com/iden3/circom/releases/latest/download/circom-linux-amd64](https://github.com/iden3/circom/releases/latest/download/circom-linux-amd64) -O circom
+  chmod +x circom
+  sudo mv circom /usr/local/bin/circom
+fi
+
+# 4. Create Workspace
+WORKDIR="${HOME}/pqabse_deps"
+mkdir -p "$WORKDIR"
+cd "$WORKDIR"
+
+# 5. Build and Install LibOQS
+if [ ! -f /usr/local/lib64/cmake/liboqs/liboqsConfig.cmake ] && [ ! -f /usr/local/lib/cmake/liboqs/liboqsConfig.cmake ]; then
+  rm -rf liboqs
+  git clone --depth 1 [https://github.com/open-quantum-safe/liboqs.git](https://github.com/open-quantum-safe/liboqs.git)
+  cd liboqs
+  cmake -S . -B build -DBUILD_SHARED_LIBS=ON -DOQS_BUILD_ONLY_LIB=ON
+  cmake --build build -j2
+  sudo cmake --install build
+  sudo ldconfig
+  cd ..
+fi
+
+# 6. Build and Install OpenFHE
+if [ ! -d /usr/local/include/openfhe ]; then
+  git clone --branch v1.2.2 --depth 1 [https://github.com/openfheorg/openfhe-development.git](https://github.com/openfheorg/openfhe-development.git)
+  cd openfhe-development
+  cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_SHARED=ON -DBUILD_UNITTESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF
+  cmake --build build -j2
+  sudo cmake --install build
+  sudo ldconfig
+  cd ..
+fi
+```
+Repeat this setup for your TA Node, Edge Node, and Cloud Server instances before proceeding.
