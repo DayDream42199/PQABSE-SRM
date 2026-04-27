@@ -184,6 +184,21 @@ class CsHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/mobile/sync-state":
+            result = self._run_script("sync-state")
+            status = HTTPStatus.OK if result.returncode == 0 else HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(
+                status,
+                {
+                    "status": "ok" if result.returncode == 0 else "fail",
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "blockchain_state": self._load_blockchain_state(),
+                    "stored_bundle_labels": self._list_stored_bundle_labels(),
+                },
+            )
+            return
+
         if self.path == "/mobile/query-archive":
             try:
                 payload = json.loads((self._read_body() or b"{}").decode("utf-8"))

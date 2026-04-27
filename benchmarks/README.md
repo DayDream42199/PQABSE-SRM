@@ -16,6 +16,11 @@ The runner appends results into the same CSV files every time you execute it.
 If your `TA`, `Edge`, and `CS` are deployed on cloud instances and the mobile side runs in the emulator, use:
 
 - [run_cloud_server_experiments.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_server_experiments.py)
+- [run_cloud_edge_encrypt_experiments.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_edge_encrypt_experiments.py)
+- [run_cloud_cs_search_experiments.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_cs_search_experiments.py)
+- [run_cloud_ta_keygen_experiments.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_ta_keygen_experiments.py)
+- [run_cloud_ta_trapdoor_experiments.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_ta_trapdoor_experiments.py)
+- [run_cloud_ta_revoke_experiments.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_ta_revoke_experiments.py)
 
 This script measures server-side timings from the real cloud HTTP responses:
 
@@ -26,6 +31,9 @@ This script measures server-side timings from the real cloud HTTP responses:
 - `update_token_write_ms` from `TA`
 
 It does **not** measure mobile decrypt time. That still has to be collected from the emulator/app side.
+
+Use the dedicated CS search runner when you want to benchmark only the CS-side search family with an explicit CS state sync before querying.
+Use the dedicated Edge/TA runners when you want one CSV family per experiment instead of one combined cloud file.
 
 ## Files
 
@@ -267,6 +275,44 @@ python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_server_experime
   --ta-url http://<TA_IP>:8081 \
   --edge-url http://<EDGE_IP>:8082 \
   --cs-url http://<CS_IP>:8083
+```
+
+### Dedicated CS search benchmark
+
+```bash
+python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_cs_search_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082 \
+  --cs-url http://<CS_IP>:8083
+```
+
+### Dedicated Edge-node encrypt benchmark
+
+```bash
+python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_edge_encrypt_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082
+```
+
+### Dedicated TA key-generation benchmark
+
+```bash
+python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_ta_keygen_experiments.py \
+  --ta-url http://<TA_IP>:8081
+```
+
+### Dedicated TA trapdoor benchmark
+
+```bash
+python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_ta_trapdoor_experiments.py \
+  --ta-url http://<TA_IP>:8081
+```
+
+### Dedicated TA revoke/update-token benchmark
+
+```bash
+python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_ta_revoke_experiments.py \
+  --ta-url http://<TA_IP>:8081
 ```
 
 Optional suites:
