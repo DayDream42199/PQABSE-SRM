@@ -58,7 +58,6 @@ role_dir_for() {
 
 system_packages() {
   sudo dnf -y update
-  sudo dnf -y groupinstall "Development Tools"
   sudo dnf -y install \
     cmake \
     git \
@@ -79,8 +78,7 @@ system_packages() {
     jq \
     which \
     patch \
-    perl \
-    libunwind-devel
+    perl
 }
 
 build_liboqs() {
