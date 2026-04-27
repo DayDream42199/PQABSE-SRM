@@ -97,6 +97,22 @@ def require_timing(response: dict, key: str) -> float:
     return float(value)
 
 
+def register_user(ta_url: str, gid: str) -> dict:
+    return http_post_json(f"{ta_url}/mobile/register", {"gid": gid, "attributes": ["alpha", "beta"]})
+
+
+def revoke_user(ta_url: str, gid: str) -> dict:
+    return http_post_json(f"{ta_url}/mobile/revoke", {"revoked_gid": gid})
+
+
+def prepare_revoke_case(ta_url: str, user_count: int) -> tuple[str, list[str]]:
+    tag = f"revoke_{user_count}_{random_suffix()}"
+    gids = [f"{tag}_user_{index:03d}" for index in range(user_count)]
+    for gid in gids:
+        register_user(ta_url, gid)
+    return tag, gids
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run only the TA revoke/update-token cloud benchmark and append CSV rows.")
     parser.add_argument("--ta-url", required=True, help="Base TA URL, for example http://1.2.3.4:8081")
@@ -113,14 +129,15 @@ def main() -> int:
 
     ta_url = args.ta_url.rstrip("/")
     for user_count in USER_COUNTS:
+        print(f"[ta_update_token_write] user_count={user_count} preparing shared user pool", flush=True)
+        tag, revocable_gids = prepare_revoke_case(ta_url, user_count)
         run_values: list[float] = []
         for run_index in range(1, args.repeats + 1):
             print(f"[ta_update_token_write] user_count={user_count} run {run_index}/{args.repeats}", flush=True)
-            tag = f"revoke_{user_count}_{run_index}_{random_suffix()}"
-            gids = [f"{tag}_user_{index:03d}" for index in range(user_count)]
-            for gid in gids:
-                http_post_json(f"{ta_url}/mobile/register", {"gid": gid, "attributes": ["alpha", "beta"]})
-            response = http_post_json(f"{ta_url}/mobile/revoke", {"revoked_gid": gids[0]})
+            if run_index > 1:
+                replacement_gid = f"{tag}_replacement_{run_index:02d}"
+                register_user(ta_url, replacement_gid)
+            response = revoke_user(ta_url, revocable_gids[run_index - 1])
             duration_ms = require_timing(response, "update_token_write_ms")
             run_values.append(duration_ms)
             append_run_row(args.runs_csv, user_count, run_index, duration_ms)

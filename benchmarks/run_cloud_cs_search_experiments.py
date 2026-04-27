@@ -170,10 +170,19 @@ def prepare_query(config: EndpointConfig, gid: str, preferred_label: str, keywor
     )
 
 
-def query_archive(config: EndpointConfig, request_archive_base64: str) -> dict:
+def query_mobile(config: EndpointConfig, gid: str, preferred_label: str, prepare_response: dict) -> dict:
+    query_package = prepare_response.get("query_package") or {}
     return http_post_json(
-        f"{config.cs_url}/mobile/query-archive",
-        {"request_archive_base64": request_archive_base64},
+        f"{config.cs_url}/mobile/query",
+        {
+            "gid": gid,
+            "preferred_label": preferred_label,
+            "auth_token_base64": query_package["auth_token_base64"],
+            "shortlist_trapdoor_base64": query_package["shortlist_trapdoor_base64"],
+            "prover_state_base64": query_package.get("prover_state_base64", ""),
+            "proof_file_base64": query_package.get("proof_file_base64", ""),
+            "public_file_base64": query_package.get("public_file_base64", ""),
+        },
     )
 
 
@@ -181,8 +190,8 @@ def keyword_list(run_tag: str, count: int) -> list[str]:
     return [f"{run_tag}_kw_{index:04d}" for index in range(count)]
 
 
-def benchmark_search(config: EndpointConfig, keyword_count: int, run_index: int) -> float:
-    tag = f"search_{keyword_count}_{run_index}_{random_suffix()}"
+def prepare_search_case(config: EndpointConfig, keyword_count: int) -> tuple[str, str, dict]:
+    tag = f"search_{keyword_count}_{random_suffix()}"
     owner_gid = f"{tag}_owner"
     searcher_gid = f"{tag}_searcher"
     label = f"{tag}_bundle"
@@ -208,14 +217,11 @@ def benchmark_search(config: EndpointConfig, keyword_count: int, run_index: int)
         keywords=keywords,
     )
 
-    try:
-        query_response = query_archive(config, prepare_response["request_archive_base64"])
-    except RuntimeError as exc:
-        # One sync-and-retry helps when CS has just advanced relative to TA registrations.
-        if "Authentication token verification failed" not in str(exc):
-            raise
-        sync_cs_state(config)
-        query_response = query_archive(config, prepare_response["request_archive_base64"])
+    return searcher_gid, label, prepare_response
+
+
+def benchmark_search(config: EndpointConfig, searcher_gid: str, label: str, prepare_response: dict) -> float:
+    query_response = query_mobile(config, searcher_gid, label, prepare_response)
 
     return require_timing(query_response, "candidate_generation_ms")
 
@@ -245,10 +251,12 @@ def main() -> int:
     )
 
     for keyword_count in KEYWORD_COUNTS:
+        print(f"[cs_search] keyword_count={keyword_count} preparing shared search case", flush=True)
+        searcher_gid, label, prepare_response = prepare_search_case(config, keyword_count)
         run_values: list[float] = []
         for run_index in range(1, args.repeats + 1):
             print(f"[cs_search] keyword_count={keyword_count} run {run_index}/{args.repeats}", flush=True)
-            duration_ms = benchmark_search(config, keyword_count, run_index)
+            duration_ms = benchmark_search(config, searcher_gid, label, prepare_response)
             run_values.append(duration_ms)
             append_run_row(args.runs_csv, keyword_count, run_index, duration_ms)
             print(f"  -> {duration_ms:.3f} ms", flush=True)
