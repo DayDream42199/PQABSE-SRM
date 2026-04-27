@@ -216,12 +216,12 @@ PQ_ABSE_TA_URL="http://<Your_TA_instance_publicIP>:8081" bash ./cs.sh serve-http
 While testing the system capabilities via the Android app, you should actively monitor the terminal outputs for all three AWS instances (TA, Edge, and CS).
 
 Expected Behavior & Status Codes
-Successful Operations (200 OK): A fully successful end-to-end flow will typically result in a 200 HTTP status code appearing across all relevant server logs.
+**Successful Operations (200 OK):** A fully successful end-to-end flow will typically result in a 200 HTTP status code appearing across all relevant server logs.
 
-State Updates & Revocation (500 Internal Server Error): When a user is revoked, the global system state (epoch) advances. If an active, non-revoked user attempts to generate a query artifact immediately after a revocation event, the server will intentionally reject it and throw a 500 status code because their keys are out of date.
+**State Updates & Revocation (500 Internal Server Error):** When a user is revoked, the global system state (epoch) advances. If an active, non-revoked user attempts to generate a query artifact immediately after a revocation event, the server will intentionally reject it and throw a 500 status code because their keys are out of date.
 
-The Fix (Valid Users): The user must refresh their key to sync with the new epoch before trying again. Follow the Revocation steps below.
-The Lockout (Revoked Users): If a revoked user attempts to refresh their key, the TA node will permanently reject the request, and the 500 error will persist, proving the zero-knowledge lockout is functional.
+**The Fix (Valid Users):** The user must refresh their key to sync with the new epoch before trying again. Follow the Revocation steps below.
+**The Lockout (Revoked Users):** If a revoked user attempts to refresh their key, the TA node will permanently reject the request, and the 500 error will persist, proving the zero-knowledge lockout is functional.
 
 ### 4.1 Keygen
 
