@@ -45,4 +45,38 @@ Follow these instructions step-by-step to spin up your nodes.
    * If not, click **Create new key pair**. Name it, select **RSA**, and choose the **.pem** format. Click create to download the file. *Warning: Do NOT lose this file; it is the only way to interact with your instances.*
 5. **Instance-Specific Settings (Crucial):** Before clicking launch, scroll down to **Advanced Details** and configure the **Nitro Enclave** setting based on the node you are building. Refer to the table below.
 6. Click **Launch instance**.
-7. Repeat this process until you have created
+7. Repeat this process until you have created all 3 instances.
+
+### Phase 2: Configure Security Groups (Ports)
+1. In the EC2 Dashboard, click on one of your running instances.
+2. Navigate to the **Security** tab and click on the assigned **Security group**.
+3. Under **Inbound rules**, click **Edit inbound rules**, then **Add rule**.
+4. Configure the rule:
+   * **Type:** Custom TCP
+   * **Source:** Anywhere-IPv4 (`0.0.0.0/0`)
+   * **Port Range:** *(See the table below)*
+5. Click **Save rules**. Repeat this for all 3 instances.
+
+### Summary of Instance Configurations
+| Node / Instance Name | Nitro Enclaves (Advanced Details) | Custom TCP Port |
+| :--- | :--- | :--- |
+| **TA + IA + Blockchain** | **Enable** | `8081` |
+| **Edge Node** | **Enable** | `8082` |
+| **Cloud Server (CS)** | Disable *(Leave default)* | `8083` |
+
+Go back to the instances dashboard and record the public IPs of all instances. Your AWS instances are now online.
+
+---
+
+## 2. Dependencies and Code Setup (AWS Instances)
+
+Before deploying the code, you must prepare your local terminal and configure the fundamental cryptographic libraries on your AWS instances.
+
+### 0. Local Machine Preparation (Do this first)
+Before connecting to AWS, secure your downloaded `.pem` key file using WSL.
+1. Copy the `.pem` key file into your Linux home directory: `\\wsl.localhost\Ubuntu\home\<Your_Username>\`
+2. Open your Ubuntu terminal and run:
+```bash
+cd ~
+chmod 400 <Your_key>.pem
+```
