@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+import random
 
 
 ROOT = Path(__file__).resolve().parent
@@ -29,6 +30,15 @@ KEYWORD_COUNTS = [20, 300, 500, 1000, 2000, 4000]
 REVOCATION_USER_COUNTS = [10, 20, 30, 40, 50]
 RUNS_PER_POINT = 5
 SEARCH_FILE_COUNT = 100
+SEARCH_QUERY_KEYWORDS = 5
+
+COMMON_BAND_RATIO = 0.05
+MEDIUM_BAND_RATIO = 0.20
+RARE_BAND_RATIO = 0.35
+COMMON_PER_DOC_RATIO = 0.16
+MEDIUM_PER_DOC_RATIO = 0.36
+RARE_PER_DOC_RATIO = 0.28
+SELECTIVE_CLUSTER_SPAN = 8
 
 FIXED_POLICIES = [
     ("and", 1, [f"attr_{i:04d}" for i in range(1, 6)]),
@@ -45,6 +55,75 @@ def keywords(count: int) -> list[str]:
 
 def attrs(count: int) -> list[str]:
     return [f"attr_{i:04d}" for i in range(1, count + 1)]
+
+
+def split_keyword_bands(pool: list[str]) -> tuple[list[str], list[str], list[str], list[str]]:
+    common_count = max(1, int(len(pool) * COMMON_BAND_RATIO))
+    medium_count = max(1, int(len(pool) * MEDIUM_BAND_RATIO))
+    rare_count = max(1, int(len(pool) * RARE_BAND_RATIO))
+    if common_count + medium_count + rare_count >= len(pool):
+        rare_count = max(1, len(pool) - common_count - medium_count - 1)
+    common = pool[:common_count]
+    medium = pool[common_count:common_count + medium_count]
+    rare = pool[common_count + medium_count:common_count + medium_count + rare_count]
+    selective = pool[common_count + medium_count + rare_count:]
+    if not selective:
+        selective = rare[-1:]
+        rare = rare[:-1]
+    return common, medium, rare, selective
+
+
+def sample_keywords_without_replacement(pool: list[str], count: int, rng: random.Random) -> list[str]:
+    if count <= 0 or not pool:
+        return []
+    return rng.sample(pool, min(len(pool), count))
+
+
+def corpus_keywords(keyword_count: int, file_count: int, seed: int) -> tuple[list[list[str]], list[str]]:
+    pool = keywords(keyword_count)
+    common, medium, rare, selective = split_keyword_bands(pool)
+    keywords_per_doc = min(keyword_count, max(8, keyword_count // 20))
+    common_per_doc = min(len(common), max(1, int(keywords_per_doc * COMMON_PER_DOC_RATIO)))
+    medium_per_doc = min(len(medium), max(1, int(keywords_per_doc * MEDIUM_PER_DOC_RATIO)))
+    rare_per_doc = min(
+        len(rare),
+        max(1, int(keywords_per_doc * RARE_PER_DOC_RATIO)),
+    )
+    selective_per_doc = max(1, keywords_per_doc - common_per_doc - medium_per_doc - rare_per_doc)
+
+    bundles: list[list[str]] = []
+    master_rng = random.Random(seed)
+    cluster_count = max(1, (file_count + SELECTIVE_CLUSTER_SPAN - 1) // SELECTIVE_CLUSTER_SPAN)
+    selective_bucket_width = max(1, len(selective) // cluster_count)
+    for doc_idx in range(file_count):
+        doc_rng = random.Random(master_rng.randint(0, 1_000_000_000) ^ doc_idx)
+        doc_keywords: set[str] = set()
+        doc_keywords.update(sample_keywords_without_replacement(common, common_per_doc, doc_rng))
+        doc_keywords.update(sample_keywords_without_replacement(medium, medium_per_doc, doc_rng))
+        doc_keywords.update(sample_keywords_without_replacement(rare, rare_per_doc, doc_rng))
+        cluster_id = doc_idx // SELECTIVE_CLUSTER_SPAN
+        selective_begin = min(cluster_id * selective_bucket_width, len(selective))
+        selective_end = min(len(selective), selective_begin + selective_bucket_width)
+        selective_bucket = selective[selective_begin:selective_end] or selective
+        doc_keywords.update(sample_keywords_without_replacement(selective_bucket, selective_per_doc, doc_rng))
+        if len(doc_keywords) < keywords_per_doc:
+            fallback_pool = medium + rare + selective + common
+            for keyword in fallback_pool:
+                if len(doc_keywords) >= keywords_per_doc:
+                    break
+                doc_keywords.add(keyword)
+        bundles.append(sorted(doc_keywords))
+
+    query_rng = random.Random(seed ^ 0x5F3759DF)
+    target_keywords = bundles[0]
+    query_keywords = sorted(
+        sample_keywords_without_replacement(
+            target_keywords,
+            min(SEARCH_QUERY_KEYWORDS, len(target_keywords)),
+            query_rng,
+        )
+    )
+    return bundles, query_keywords
 
 
 def role_app_dir(role: str) -> Path:
@@ -271,10 +350,19 @@ def setup_search_stack(keyword_count: int):
     register_user(role, "search_user", FIXED_POLICIES[0][2], None)
     register_user(role, "owner_search", FIXED_POLICIES[0][2], None)
     policy_type, threshold, policy_attrs = FIXED_POLICIES[0]
-    kw_list = keywords(keyword_count)
+    corpus, query_keywords = corpus_keywords(keyword_count, SEARCH_FILE_COUNT, seed=keyword_count * 7919 + 17)
     for index in range(SEARCH_FILE_COUNT):
-        encrypt_bundle(role, "owner_search", f"bundle_{index:03d}", f"payload_{index}", policy_type, threshold, policy_attrs, kw_list)
-    return kw_list
+        encrypt_bundle(
+            role,
+            "owner_search",
+            f"bundle_{index:03d}",
+            f"payload_{index}",
+            policy_type,
+            threshold,
+            policy_attrs,
+            corpus[index],
+        )
+    return query_keywords
 
 
 def run_search_speed_experiment():
@@ -282,8 +370,8 @@ def run_search_speed_experiment():
     for keyword_count in KEYWORD_COUNTS:
         values = []
         for run_idx in range(RUNS_PER_POINT):
-            kw_list = setup_search_stack(keyword_count)
-            request_dir, _ = prepare_query("cs", "search_user", "bundle_000", kw_list, f"search_{keyword_count}_{run_idx}")
+            query_keywords = setup_search_stack(keyword_count)
+            request_dir, _ = prepare_query("cs", "search_user", "bundle_000", query_keywords, f"search_{keyword_count}_{run_idx}")
             response_dir = role_runtime_dir("cs") / "service" / "responses" / f"search_{keyword_count}_{run_idx}"
             values.append(process_query(request_dir, response_dir, f"search_{keyword_count}_{run_idx}"))
         print_average("search_speed", "keyword_count", keyword_count, values)
@@ -299,7 +387,8 @@ def run_trapdoor_experiment():
             reset_all_runtimes()
             setup_role("mdu")
             register_user("mdu", "trap_user", FIXED_POLICIES[0][2], None)
-            request_dir, timing_path = prepare_query("mdu", "trap_user", "preferred_bundle", keywords(keyword_count),
+            _, query_keywords = corpus_keywords(keyword_count, SEARCH_FILE_COUNT, seed=keyword_count * 6151 + run_idx)
+            request_dir, timing_path = prepare_query("mdu", "trap_user", "preferred_bundle", query_keywords,
                                                      f"trapdoor_{keyword_count}_{run_idx}")
             values.append(read_timing(timing_path))
             shutil.rmtree(request_dir, ignore_errors=True)
@@ -318,10 +407,11 @@ def run_decryption_experiment():
             setup_role("mdu")
             register_user("mdu", "decrypt_user", policy_attrs, None)
             register_user("mdu", "owner_decrypt", policy_attrs, None)
-            kw_list = keywords(keyword_count)
+            corpus, query_keywords = corpus_keywords(keyword_count, 1, seed=keyword_count * 4253 + run_idx)
+            kw_list = corpus[0]
             label = f"decrypt_bundle_{keyword_count}_{run_idx}"
             encrypt_bundle("mdu", "owner_decrypt", label, "payload", policy_type, threshold, policy_attrs, kw_list)
-            request_dir, _ = prepare_query("mdu", "decrypt_user", label, kw_list, f"decrypt_{keyword_count}_{run_idx}")
+            request_dir, _ = prepare_query("mdu", "decrypt_user", label, query_keywords, f"decrypt_{keyword_count}_{run_idx}")
             response_dir = role_runtime_dir("mdu") / "service" / "responses" / f"decrypt_{keyword_count}_{run_idx}"
             copy_bundle_to_response("mdu", label, response_dir)
             values.append(decrypt_response(request_dir, response_dir, "decrypt_user", f"decrypt_{keyword_count}_{run_idx}"))

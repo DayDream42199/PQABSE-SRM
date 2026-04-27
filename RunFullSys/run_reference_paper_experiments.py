@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import heapq
+import pickle
 import random
 import time
 from pathlib import Path
@@ -30,13 +31,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RESULTS_DIR = ROOT / "reference_experiment_results"
+CORPUS_CACHE_ROOT = ROOT / "reference_test_corpus" / "generated"
 
 # Patched for the requested Paper 6 scaling.
-KEYWORD_COUNTS = [20, 300, 500, 1000]
+KEYWORD_COUNTS = [10, 50, 100, 300, 500]
 KEYGEN_ATTR_COUNTS = [10, 20, 30, 40, 50]
 REVOCATION_USER_COUNTS = [10, 20, 30, 40, 50]
 RUNS_PER_POINT = 5
 SEARCH_FILE_COUNT = 100
+FILE_COUNTS = [10, 100, 300, 500, 1000]
 
 MODULUS = 2_147_483_647
 PAPER1_QUERY_KEYWORDS = 5
@@ -49,6 +52,14 @@ PAPER6_VECTOR_DIM = 256
 PAPER6_KEYGEN_ROUNDS = 24
 PAPER6_ENCRYPTION_ROUNDS = 18
 PAPER6_DECRYPTION_ROUNDS = 12
+
+COMMON_BAND_RATIO = 0.05
+MEDIUM_BAND_RATIO = 0.20
+RARE_BAND_RATIO = 0.35
+COMMON_PER_DOC_RATIO = 0.16
+MEDIUM_PER_DOC_RATIO = 0.36
+RARE_PER_DOC_RATIO = 0.28
+SELECTIVE_CLUSTER_SPAN = 8
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,7 +75,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--search-file-count",
         type=int,
         default=SEARCH_FILE_COUNT,
-        help="Synthetic corpus size used by the Paper 1 search benchmark.",
+        help="Synthetic corpus size used by the Paper 1 keyword-scaling benchmark.",
+    )
+    parser.add_argument(
+        "--paper1-file-counts",
+        default="10,100,300,500,1000",
+        help="Default file-count steps for the Paper 1 file-scaling benchmark.",
+    )
+    parser.add_argument(
+        "--paper1-keyword-counts",
+        default="10,50,100,300,500",
+        help="Default keyword-count steps for the Paper 1 keyword-scaling benchmark.",
     )
     parser.add_argument(
         "--output-dir",
@@ -72,7 +93,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=RESULTS_DIR,
         help="Directory where CSV outputs are written.",
     )
+    parser.add_argument(
+        "--corpus-cache-dir",
+        type=Path,
+        default=CORPUS_CACHE_ROOT,
+        help="Directory where reusable Paper 1 synthetic corpora are cached.",
+    )
     return parser
+
+
+def parse_int_list(raw: str) -> list[int]:
+    values = []
+    for item in raw.split(","):
+        item = item.strip()
+        if item:
+            values.append(int(item))
+    return values
 
 
 def print_phase(message: str):
@@ -133,6 +169,93 @@ def dot_score(left: list[int], right: list[int]) -> int:
     return sum((a * b) % MODULUS for a, b in zip(left, right)) % MODULUS
 
 
+def split_band_counts(keyword_count: int) -> tuple[int, int, int, int]:
+    common = max(1, int(keyword_count * COMMON_BAND_RATIO))
+    medium = max(1, int(keyword_count * MEDIUM_BAND_RATIO))
+    rare = max(1, int(keyword_count * RARE_BAND_RATIO))
+    selective = keyword_count - common - medium - rare
+    if selective <= 0:
+        selective = 1
+        rare = max(1, rare - 1)
+    return common, medium, rare, selective
+
+
+def banded_keyword_indices(keyword_count: int, file_count: int, run_idx: int) -> list[list[int]]:
+    common_count, medium_count, rare_count, selective_count = split_band_counts(keyword_count)
+    common_range = list(range(common_count))
+    medium_range = list(range(common_count, common_count + medium_count))
+    rare_range = list(range(common_count + medium_count, common_count + medium_count + rare_count))
+    selective_range = list(range(common_count + medium_count + rare_count, keyword_count))
+
+    keywords_per_doc = max(PAPER1_QUERY_KEYWORDS, min(keyword_count, max(8, keyword_count // 20)))
+    common_per_doc = min(len(common_range), max(1, int(keywords_per_doc * COMMON_PER_DOC_RATIO)))
+    medium_per_doc = min(len(medium_range), max(1, int(keywords_per_doc * MEDIUM_PER_DOC_RATIO)))
+    rare_per_doc = min(len(rare_range), max(1, int(keywords_per_doc * RARE_PER_DOC_RATIO)))
+    selective_per_doc = max(1, keywords_per_doc - common_per_doc - medium_per_doc - rare_per_doc)
+
+    rng = random.Random(seed_for(1, keyword_count, run_idx))
+    cluster_count = max(1, (file_count + SELECTIVE_CLUSTER_SPAN - 1) // SELECTIVE_CLUSTER_SPAN)
+    selective_bucket_width = max(1, max(1, selective_count) // cluster_count)
+    corpus_indices: list[list[int]] = []
+    for doc_idx in range(file_count):
+        doc_rng = random.Random(rng.randint(0, 1_000_000_000) ^ doc_idx)
+        indices: set[int] = set()
+        indices.update(doc_rng.sample(common_range, common_per_doc))
+        indices.update(doc_rng.sample(medium_range, medium_per_doc))
+        indices.update(doc_rng.sample(rare_range, rare_per_doc))
+        cluster_id = doc_idx // SELECTIVE_CLUSTER_SPAN
+        selective_begin = common_count + medium_count + rare_count + cluster_id * selective_bucket_width
+        selective_end = min(keyword_count, selective_begin + selective_bucket_width)
+        selective_bucket = list(range(selective_begin, selective_end)) or selective_range
+        if selective_bucket:
+            indices.update(doc_rng.sample(selective_bucket, min(selective_per_doc, len(selective_bucket))))
+        fallback = medium_range + rare_range + selective_range + common_range
+        for index in fallback:
+            if len(indices) >= keywords_per_doc:
+                break
+            indices.add(index)
+        corpus_indices.append(sorted(indices))
+    return corpus_indices
+
+
+def vector_from_indices(slot_count: int, indices: list[int], rng: random.Random, min_value: int, max_value: int) -> list[int]:
+    vector = [0] * slot_count
+    for index in indices:
+        vector[index] = rng.randint(min_value, max_value)
+    return vector
+
+
+def ensure_dir(path: Path):
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def paper1_cache_prefix(keyword_count: int, run_idx: int) -> str:
+    return f"paper1_kw_{keyword_count:04d}_run_{run_idx:02d}_files_"
+
+
+def paper1_cache_path(cache_dir: Path, keyword_count: int, run_idx: int, max_file_count: int) -> Path:
+    return cache_dir / f"{paper1_cache_prefix(keyword_count, run_idx)}{max_file_count:05d}.pkl"
+
+
+def find_cached_paper1_corpus(cache_dir: Path, keyword_count: int, run_idx: int, min_file_count: int) -> Path | None:
+    if not cache_dir.exists():
+        return None
+    prefix = paper1_cache_prefix(keyword_count, run_idx)
+    candidates: list[tuple[int, Path]] = []
+    for path in cache_dir.glob(f"{prefix}*.pkl"):
+        suffix = path.stem.removeprefix(prefix)
+        try:
+            file_count = int(suffix)
+        except ValueError:
+            continue
+        if file_count >= min_file_count:
+            candidates.append((file_count, path))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
 def write_csv(path: Path, rows: list[dict]):
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
@@ -154,22 +277,66 @@ def seed_for(*parts: int) -> int:
     return seed
 
 
-def paper1_build_corpus(keyword_count: int, file_count: int, run_idx: int) -> tuple[int, list[dict[str, list[int]]]]:
+def paper1_build_corpus(keyword_count: int, file_count: int, run_idx: int) -> tuple[int, list[dict[str, list[int]]], list[list[int]]]:
     degree = choose_poly_degree(keyword_count)
     slots = degree // 2
     corpus: list[dict[str, list[int]]] = []
     rng = random.Random(seed_for(1, keyword_count, run_idx))
-    doc_keyword_count = max(PAPER1_QUERY_KEYWORDS, min(slots, max(8, keyword_count // 20)))
+    corpus_indices = banded_keyword_indices(min(keyword_count, slots), file_count, run_idx)
     for doc_idx in range(file_count):
         doc_rng = random.Random(rng.randint(0, 1_000_000_000) ^ doc_idx)
-        encoded = make_sparse_vector(slots, doc_keyword_count, doc_rng)
-        noise_a = make_sparse_vector(slots, doc_keyword_count, doc_rng, 0, 17)
-        noise_b = make_sparse_vector(slots, doc_keyword_count, doc_rng, 0, 17)
-        secret = make_sparse_vector(slots, doc_keyword_count, doc_rng, 1, 31)
+        doc_indices = corpus_indices[doc_idx]
+        encoded = vector_from_indices(slots, doc_indices, doc_rng, 1, 1)
+        noise_a = vector_from_indices(slots, doc_indices, doc_rng, 0, 17)
+        noise_b = vector_from_indices(slots, doc_indices, doc_rng, 0, 17)
+        secret = vector_from_indices(slots, doc_indices, doc_rng, 1, 31)
         c0 = vec_add(encoded, noise_a)
         c1 = vec_add(vec_mul(encoded, secret), noise_b)
         corpus.append({"c0": c0, "c1": c1, "secret": secret})
-    return slots, corpus
+    return slots, corpus, corpus_indices
+
+
+def load_or_generate_paper1_corpus(
+    keyword_count: int,
+    file_count: int,
+    run_idx: int,
+    cache_dir: Path,
+) -> dict[str, object]:
+    ensure_dir(cache_dir)
+    cached_path = find_cached_paper1_corpus(cache_dir, keyword_count, run_idx, file_count)
+    if cached_path is not None:
+        with cached_path.open("rb") as handle:
+            cached = pickle.load(handle)
+        return {
+            "slots": cached["slots"],
+            "corpus": cached["corpus"][:file_count],
+            "corpus_indices": cached["corpus_indices"][:file_count],
+            "query_indices": cached["query_indices"],
+            "cached_from": cached_path,
+        }
+
+    slots, corpus, corpus_indices = paper1_build_corpus(keyword_count, file_count, run_idx)
+    query_rng = random.Random(seed_for(103, keyword_count, run_idx))
+    query_indices = sorted(query_rng.sample(corpus_indices[0], min(PAPER1_QUERY_KEYWORDS, len(corpus_indices[0]))))
+    payload = {
+        "keyword_count": keyword_count,
+        "run_idx": run_idx,
+        "max_file_count": file_count,
+        "slots": slots,
+        "corpus": corpus,
+        "corpus_indices": corpus_indices,
+        "query_indices": query_indices,
+    }
+    output_path = paper1_cache_path(cache_dir, keyword_count, run_idx, file_count)
+    with output_path.open("wb") as handle:
+        pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    return {
+        "slots": slots,
+        "corpus": corpus,
+        "corpus_indices": corpus_indices,
+        "query_indices": query_indices,
+        "cached_from": output_path,
+    }
 
 
 def paper1_encrypt(keyword_count: int, run_idx: int) -> float:
@@ -191,14 +358,16 @@ def paper1_encrypt(keyword_count: int, run_idx: int) -> float:
     return (time.perf_counter() - start) * 1000.0
 
 
-def paper1_trapdoor(keyword_count: int, run_idx: int) -> tuple[float, dict[str, list[int]]]:
+def paper1_trapdoor(keyword_count: int, run_idx: int, query_indices: list[int] | None = None) -> tuple[float, dict[str, list[int]]]:
     degree = choose_poly_degree(keyword_count)
     slots = degree // 2
     rng = random.Random(seed_for(102, keyword_count, run_idx))
-    query = make_sparse_vector(slots, min(PAPER1_QUERY_KEYWORDS, keyword_count), rng)
-    secret = make_sparse_vector(slots, min(PAPER1_QUERY_KEYWORDS, keyword_count), rng, 1, 31)
-    rekey = make_sparse_vector(slots, min(PAPER1_QUERY_KEYWORDS, keyword_count), rng, 1, 17)
-    noise = make_sparse_vector(slots, min(PAPER1_QUERY_KEYWORDS, keyword_count), rng, 0, 11)
+    if query_indices is None:
+        query_indices = list(range(min(PAPER1_QUERY_KEYWORDS, keyword_count)))
+    query = vector_from_indices(slots, query_indices, rng, 1, 1)
+    secret = vector_from_indices(slots, query_indices, rng, 1, 31)
+    rekey = vector_from_indices(slots, query_indices, rng, 1, 17)
+    noise = vector_from_indices(slots, query_indices, rng, 0, 11)
 
     start = time.perf_counter()
     beta0 = vec_add(query, noise)
@@ -209,9 +378,14 @@ def paper1_trapdoor(keyword_count: int, run_idx: int) -> tuple[float, dict[str, 
     return elapsed_ms, {"beta0": beta0, "beta1": beta1, "beta2": beta2, "beta3": beta3}
 
 
-def paper1_search(keyword_count: int, file_count: int, run_idx: int) -> tuple[float, list[dict[str, object]]]:
-    _, trapdoor = paper1_trapdoor(keyword_count, run_idx)
-    slots, corpus = paper1_build_corpus(keyword_count, file_count, run_idx)
+def paper1_search_from_corpus(
+    keyword_count: int,
+    run_idx: int,
+    slots: int,
+    corpus: list[dict[str, list[int]]],
+    query_indices: list[int],
+) -> tuple[float, list[dict[str, object]]]:
+    _, trapdoor = paper1_trapdoor(keyword_count, run_idx, query_indices)
     _ = slots
 
     start = time.perf_counter()
@@ -230,9 +404,29 @@ def paper1_search(keyword_count: int, file_count: int, run_idx: int) -> tuple[fl
     ]
 
 
-def paper1_decrypt(keyword_count: int, file_count: int, run_idx: int) -> float:
-    _, trapdoor = paper1_trapdoor(keyword_count, run_idx)
-    _, top_results = paper1_search(keyword_count, file_count, run_idx)
+def paper1_search(
+    keyword_count: int,
+    file_count: int,
+    run_idx: int,
+    cache_dir: Path,
+) -> tuple[float, list[dict[str, object]]]:
+    cached = load_or_generate_paper1_corpus(keyword_count, file_count, run_idx, cache_dir)
+    return paper1_search_from_corpus(
+        keyword_count,
+        run_idx,
+        int(cached["slots"]),
+        cached["corpus"],
+        cached["query_indices"],
+    )
+
+
+def paper1_decrypt_from_corpus(
+    keyword_count: int,
+    run_idx: int,
+    query_indices: list[int],
+    top_results: list[dict[str, object]],
+) -> float:
+    _, trapdoor = paper1_trapdoor(keyword_count, run_idx, query_indices)
     proxy_key = rotate(trapdoor["beta3"], 5)
 
     start = time.perf_counter()
@@ -243,6 +437,23 @@ def paper1_decrypt(keyword_count: int, file_count: int, run_idx: int) -> float:
         outputs.append(dot_score(phase2, trapdoor["beta0"]))
     _ = sum(outputs) % MODULUS
     return (time.perf_counter() - start) * 1000.0
+
+
+def paper1_decrypt(
+    keyword_count: int,
+    file_count: int,
+    run_idx: int,
+    cache_dir: Path,
+) -> float:
+    cached = load_or_generate_paper1_corpus(keyword_count, file_count, run_idx, cache_dir)
+    _, top_results = paper1_search_from_corpus(
+        keyword_count,
+        run_idx,
+        int(cached["slots"]),
+        cached["corpus"],
+        cached["query_indices"],
+    )
+    return paper1_decrypt_from_corpus(keyword_count, run_idx, cached["query_indices"], top_results)
 
 
 def simulate_paper4_keygen(attribute_count: int, run_idx: int) -> float:
@@ -372,14 +583,20 @@ def paper6_decrypt(keyword_count: int, run_idx: int) -> float:
     return (time.perf_counter() - start) * 1000.0
 
 
-def run_paper1(runs: int, search_file_count: int, output_dir: Path):
+def run_paper1_keyword_scaling(
+    runs: int,
+    keyword_counts: list[int],
+    search_file_count: int,
+    output_dir: Path,
+    cache_dir: Path,
+):
     print_phase("Starting Reference Paper 1 benchmark")
     encryption_rows = []
     trapdoor_rows = []
     search_rows = []
     decrypt_rows = []
 
-    for keyword_count in KEYWORD_COUNTS:
+    for keyword_count in keyword_counts:
         encryption_values = []
         trapdoor_values = []
         search_values = []
@@ -387,10 +604,20 @@ def run_paper1(runs: int, search_file_count: int, output_dir: Path):
         for run_idx in range(runs):
             print_progress("paper1", run_idx + 1, runs, f"keyword_count={keyword_count}")
             encryption_values.append(paper1_encrypt(keyword_count, run_idx))
-            trapdoor_ms, _ = paper1_trapdoor(keyword_count, run_idx)
+            cached = load_or_generate_paper1_corpus(keyword_count, search_file_count, run_idx, cache_dir)
+            trapdoor_ms, _ = paper1_trapdoor(keyword_count, run_idx, cached["query_indices"])
             trapdoor_values.append(trapdoor_ms)
-            search_values.append(paper1_search(keyword_count, search_file_count, run_idx)[0])
-            decrypt_values.append(paper1_decrypt(keyword_count, search_file_count, run_idx))
+            search_ms, top_results = paper1_search_from_corpus(
+                keyword_count,
+                run_idx,
+                int(cached["slots"]),
+                cached["corpus"],
+                cached["query_indices"],
+            )
+            search_values.append(search_ms)
+            decrypt_values.append(
+                paper1_decrypt_from_corpus(keyword_count, run_idx, cached["query_indices"], top_results)
+            )
 
         encryption_avg = average_ms(encryption_values)
         trapdoor_avg = average_ms(trapdoor_values)
@@ -431,6 +658,63 @@ def run_paper1(runs: int, search_file_count: int, output_dir: Path):
     write_csv(output_dir / "paper1_trapdoor_results.csv", trapdoor_rows)
     write_csv(output_dir / "paper1_search_results.csv", search_rows)
     write_csv(output_dir / "paper1_decryption_results.csv", decrypt_rows)
+
+
+def run_paper1_file_scaling(
+    runs: int,
+    file_counts: list[int],
+    keyword_count: int,
+    output_dir: Path,
+    cache_dir: Path,
+):
+    print_phase("Starting Reference Paper 1 file-scaling benchmark")
+    search_rows = []
+    decrypt_rows = []
+
+    for file_count in file_counts:
+        search_values = []
+        decrypt_values = []
+        for run_idx in range(runs):
+            print_progress("paper1_file_scaling", run_idx + 1, runs, f"keyword_count={keyword_count}, file_count={file_count}")
+            cached = load_or_generate_paper1_corpus(keyword_count, file_count, run_idx, cache_dir)
+            search_ms, top_results = paper1_search_from_corpus(
+                keyword_count,
+                run_idx,
+                int(cached["slots"]),
+                cached["corpus"],
+                cached["query_indices"],
+            )
+            search_values.append(search_ms)
+            decrypt_values.append(
+                paper1_decrypt_from_corpus(keyword_count, run_idx, cached["query_indices"], top_results)
+            )
+
+        search_avg = average_ms(search_values)
+        decrypt_avg = average_ms(decrypt_values)
+        print(f"paper1_file_scaling_search: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={search_avg:.3f}")
+        print(f"paper1_file_scaling_decryption: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={decrypt_avg:.3f}")
+
+        search_rows.append(
+            {
+                "experiment": "paper1_file_scaling_search",
+                "keyword_count": keyword_count,
+                "file_count": file_count,
+                "runs": runs,
+                "avg_ms": f"{search_avg:.3f}",
+            }
+        )
+        decrypt_rows.append(
+            {
+                "experiment": "paper1_file_scaling_decryption",
+                "keyword_count": keyword_count,
+                "file_count": file_count,
+                "runs": runs,
+                "avg_ms": f"{decrypt_avg:.3f}",
+            }
+        )
+
+    write_csv(output_dir / "paper1_file_scaling_search_results.csv", search_rows)
+    write_csv(output_dir / "paper1_file_scaling_decryption_results.csv", decrypt_rows)
 
 
 def run_paper4(runs: int, output_dir: Path):
@@ -519,9 +803,25 @@ def main():
     args = build_parser().parse_args()
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+    ensure_dir(args.corpus_cache_dir)
+    paper1_keyword_counts = parse_int_list(args.paper1_keyword_counts) or KEYWORD_COUNTS
+    paper1_file_counts = parse_int_list(args.paper1_file_counts) or FILE_COUNTS
 
     if args.paper in {"all", "paper1"}:
-        run_paper1(args.runs, args.search_file_count, output_dir)
+        run_paper1_keyword_scaling(
+            args.runs,
+            paper1_keyword_counts,
+            args.search_file_count,
+            output_dir,
+            args.corpus_cache_dir,
+        )
+        run_paper1_file_scaling(
+            args.runs,
+            paper1_file_counts,
+            paper1_keyword_counts[-1],
+            output_dir,
+            args.corpus_cache_dir,
+        )
     if args.paper in {"all", "paper4"}:
         run_paper4(args.runs, output_dir)
     if args.paper in {"all", "paper5"}:
