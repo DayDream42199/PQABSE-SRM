@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PQABSE Prover</title>
+  <script src="snarkjs.min.js"></script>
+</head>
+<body>
+<script>
+  window.runProof = async function runProof(requestJson) {
+    let payload;
+    try {
+      payload = JSON.parse(requestJson);
+      const input = JSON.parse(payload.inputJson);
+      const started = performance.now();
+      const result = await snarkjs.groth16.fullProve(
+        input,
+        "https://appassets.androidplatform.net/assets/zk/pqabse_membership.wasm",
+        "https://appassets.androidplatform.net/assets/zk/pqabse_membership_final.zkey",
+        undefined,
+        { singleThread: true },
+        { singleThread: true }
+      );
+      AndroidProver.onSuccess(JSON.stringify({
+        requestId: payload.requestId,
+        elapsedMs: performance.now() - started,
+        proof: result.proof,
+        publicSignals: result.publicSignals
+      }));
+    } catch (error) {
+      const message = error && (error.stack || error.message || String(error)) || "Unknown prover error";
+      const requestId = payload && payload.requestId ? payload.requestId : "";
+      AndroidProver.onError(JSON.stringify({
+        requestId,
+        message
+      }));
+    }
+  };
+</script>
+</body>
+</html>

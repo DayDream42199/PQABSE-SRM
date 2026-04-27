@@ -1,0 +1,58 @@
+<resources>
+    <string name="app_name">PQABSESRMMobileHTTP</string>
+    <string name="app_title">PQABSE-SRM Mobile Client</string>
+    <string name="app_subtitle">Configure services, bootstrap a user, encrypt bundles, and run strict mobile query plus decrypt from one screen.</string>
+    <string name="config_section">Server Configuration</string>
+    <string name="config_section_desc">Set the TA, Edge, and CS endpoints the phone will talk to directly.</string>
+    <string name="bootstrap_section">MDU Bootstrap</string>
+    <string name="bootstrap_section_desc">Register a user and cache the mobile-side credential material needed for later query and decrypt steps.</string>
+    <string name="lifecycle_section">Revocation &amp; Refresh</string>
+    <string name="lifecycle_section_desc">Revoke a target user to advance cloud rekey state, then refresh the current user so the app holds the latest epoch-consistent key.</string>
+    <string name="encrypt_section">MDO Encrypt</string>
+    <string name="encrypt_section_desc">Create a ciphertext bundle with Edge and push it into CS so it becomes searchable.</string>
+    <string name="query_section">MDU Query</string>
+    <string name="query_section_desc">Generate the local proof and trapdoor, submit the strict query archive, then decrypt the returned bundle.</string>
+    <string name="advanced_section">Advanced Artifacts</string>
+    <string name="advanced_section_desc">These previews are auto-filled for inspection. The app still uses the full cached values internally.</string>
+    <string name="benchmark_section">Benchmark Tools</string>
+    <string name="benchmark_section_desc">Run repeated emulator-side mobile timings for query proof, trapdoor generation, and decrypt, then append the results to CSV files.</string>
+    <string name="output_section">Output</string>
+    <string name="output_section_desc">Live responses, debug details, and local decrypt output appear here.</string>
+    <string name="ta_url_hint">TA / IA URL</string>
+    <string name="edge_url_hint">Edge URL</string>
+    <string name="cs_url_hint">CS URL</string>
+    <string name="gid_hint">User GID</string>
+    <string name="attributes_hint">Attributes (comma separated)</string>
+    <string name="bundle_label_hint">Bundle Label</string>
+    <string name="plaintext_hint">Plaintext</string>
+    <string name="keywords_hint">Keywords (comma separated)</string>
+    <string name="policy_attrs_hint">Policy Expression: AND(ai,OR(cpe,doctor)) or 2-of-3(ai,cpe,doctor)</string>
+    <string name="preferred_label_hint">Preferred Label (optional)</string>
+    <string name="query_keywords_hint">Query Keywords (comma separated)</string>
+    <string name="searcher_gid_hint">Searcher GID</string>
+    <string name="revoke_target_hint">Revoke Target GID</string>
+    <string name="refresh_target_hint">Refresh Target GID</string>
+    <string name="auth_token_hint">Auth Token Preview</string>
+    <string name="shortlist_trapdoor_hint">Shortlist Trapdoor Preview</string>
+    <string name="save_config">Save Config</string>
+    <string name="fetch_state">Fetch TA State</string>
+    <string name="fetch_edge_state">Fetch Edge State</string>
+    <string name="fetch_cs_state">Fetch CS State</string>
+    <string name="register_user">Register User</string>
+    <string name="refresh_user">Refresh Current User</string>
+    <string name="revoke_target">Revoke Target User</string>
+    <string name="encrypt_bundle">Encrypt With Edge</string>
+    <string name="generate_query_artifacts">Generate Query Artifacts</string>
+    <string name="submit_query">Submit Query To CS</string>
+    <string name="decrypt_query_result">Decrypt Latest Query Result</string>
+    <string name="run_mobile_benchmarks">Run Mobile Benchmarks</string>
+    <string name="show_benchmark_files">Show Benchmark Files</string>
+    <string name="native_bridge_status">Native Bridge Status</string>
+    <string name="show_returned_key">Show Returned Key</string>
+    <string name="output_placeholder">Responses will appear here.</string>
+</resources>
+
+
+
+
+
