@@ -140,3 +140,26 @@ if [ ! -d /usr/local/include/openfhe ]; then
 fi
 ```
 Repeat this setup for your TA Node, Edge Node, and Cloud Server instances before proceeding.
+
+### 2. Deploying the TA + IA + Blockchain Instance
+Download the TA-specific code:
+```bash
+cd ~
+git clone --no-checkout --sparse --filter=blob:none [https://github.com/DayDream42199/PQABSE-SRM.git](https://github.com/DayDream42199/PQABSE-SRM.git)
+cd PQABSE-SRM
+git sparse-checkout set RunFullSys/TA+IA+Blockchain
+git checkout main
+```
+Build the C++ core and start the HTTP service:
+```bash
+cd RunFullSys/TA+IA+Blockchain/app
+npm install
+mkdir -p build-wsl
+cd build-wsl
+cmake ..
+cmake --build . -j2
+
+cd ..
+./build-wsl/phase1_setup
+bash ./ta_ia_blockchain.sh serve-http 0.0.0.0 8081
+```
