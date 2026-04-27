@@ -208,7 +208,7 @@ PQ_ABSE_TA_URL="http://<Your_TA_instance_publicIP>:8081" bash ./cs.sh serve-http
 
 ---
 
-## 3. ???
+## 3. Setting up the Mobile Client
 
 ---
 
