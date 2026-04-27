@@ -81,8 +81,6 @@ cd ~
 chmod 400 <Your_key>.pem
 ```
 
----
-
 ### 1. Universal Server Preparation (Run on ALL 3 Instances)
 Because all three nodes rely on the same heavy cryptographic libraries (OpenFHE, LibOQS) and Zero-Knowledge compilers (Circom), you must run this baseline setup on every single instance before downloading the project code.
 SSH into your instance:
