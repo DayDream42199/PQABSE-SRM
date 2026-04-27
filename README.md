@@ -222,3 +222,11 @@ State Updates & Revocation (500 Internal Server Error): When a user is revoked, 
 
 The Fix (Valid Users): The user must refresh their key to sync with the new epoch before trying again. Follow the Revocation steps below.
 The Lockout (Revoked Users): If a revoked user attempts to refresh their key, the TA node will permanently reject the request, and the 500 error will persist, proving the zero-knowledge lockout is functional.
+
+### 4.1 Keygen
+
+### 4.2 Encrypt
+
+### 4.3 Search and Decrypt
+
+### 4.4 Revocation
