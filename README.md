@@ -221,6 +221,7 @@ Expected Behavior & Status Codes
 **State Updates & Revocation (500 Internal Server Error):** When a user is revoked, the global system state (epoch) advances. If an active, non-revoked user attempts to generate a query artifact immediately after a revocation event, the server will intentionally reject it and throw a 500 status code because their keys are out of date.
 
 **The Fix (Valid Users):** The user must refresh their key to sync with the new epoch before trying again. Follow the Revocation steps below.
+
 **The Lockout (Revoked Users):** If a revoked user attempts to refresh their key, the TA node will permanently reject the request, and the 500 error will persist, proving the zero-knowledge lockout is functional.
 
 ### 4.1 Keygen
