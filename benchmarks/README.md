@@ -2,12 +2,12 @@
 
 This folder contains the experiment harness for the six benchmark families:
 
-1. ciphertext bundle creation time on Edge
-2. mobile data user decrypt time
-3. TA key generation time
-4. CS search time
-5. trapdoor generation time
-6. update-token generation/write time after revocation
+1. ciphertext bundle creation time on the Edge node
+2. mobile-side query-response decrypt time
+3. TA-side key generation time
+4. CS-side search candidate generation time
+5. TA-side trapdoor generation time
+6. TA-side update-token generation/write time after revocation
 
 The runner appends results into the same CSV files every time you execute it.
 
@@ -19,7 +19,7 @@ If your `TA`, `Edge`, and `CS` are deployed on cloud instances and the mobile si
 
 This script measures server-side timings from the real cloud HTTP responses:
 
-- `encrypt_bundle_ms` from `Edge`
+- `encrypt_bundle_ms` from the `Edge` node
 - `keygen_ms` from `TA`
 - `candidate_generation_ms` from `CS`
 - `trapdoor_gen_ms` from `TA`
@@ -82,10 +82,10 @@ These run at keyword counts:
 
 Measured metrics:
 
-- `encrypt_bundle_ms`
-- `retrieve_decrypt_ms`
-- `candidate_generation_ms`
-- `trapdoor_gen_ms`
+- `encrypt_bundle_ms` on the Edge node
+- `retrieve_decrypt_ms` on the mobile-side local decrypt path
+- `candidate_generation_ms` on CS
+- `trapdoor_gen_ms` on TA
 
 ### Attribute-scaled benchmark
 
@@ -99,7 +99,7 @@ These run at attribute counts:
 
 Measured metric:
 
-- `keygen_ms`
+- `keygen_ms` on TA
 
 ### User-count-scaled benchmark
 
@@ -113,7 +113,7 @@ These run at active user counts:
 
 Measured metric:
 
-- `update_token_write_ms`
+- `update_token_write_ms` on TA
 
 ## Run Everything
 
@@ -125,17 +125,31 @@ python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_all_experiments.py
 
 ### Keyword benchmarks
 
+These include three cloud/local role-specific families depending on which runner you use:
+
+- `edge_node_encrypt`
+- `cs_search`
+- `ta_trapdoor_generation`
+
 ```bash
 python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_all_experiments.py --suite keyword
 ```
 
 ### Key generation benchmark
 
+CSV experiment label:
+
+- `ta_key_generation`
+
 ```bash
 python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_all_experiments.py --suite keygen
 ```
 
 ### Revocation benchmark
+
+CSV experiment label:
+
+- `ta_update_token_write`
 
 ```bash
 python3 /home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_all_experiments.py --suite revoke
@@ -181,10 +195,10 @@ Each row contains:
 
 ## Notes
 
-- The runner resets TA, Edge, CS, and MDU runtimes between runs for cleaner measurements.
+- The local runner resets TA, Edge, CS, and MDU runtimes between runs for cleaner measurements.
 - Results are appended, not overwritten.
 - If you want a fresh CSV, delete the old CSV files first.
-- The script uses local binaries directly; it does not require the HTTP servers to be running.
+- The local runner uses local binaries directly; it does not require the HTTP servers to be running.
 
 ## Run Against Cloud TA, Edge, and CS
 

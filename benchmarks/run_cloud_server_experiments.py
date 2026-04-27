@@ -305,7 +305,7 @@ def parse_args() -> argparse.Namespace:
         "--suite",
         choices=["all", "keyword", "keygen", "revoke"],
         default="all",
-        help="keyword runs encrypt/search/trapdoor keyword-sweep; keygen runs attribute-sweep; revoke runs user-count sweep.",
+        help="keyword runs Edge-node encrypt, CS search, and TA trapdoor keyword sweeps; keygen runs the TA attribute sweep; revoke runs the TA user-count sweep.",
     )
     parser.add_argument("--averages-csv", type=Path, default=Path("cloud_benchmark_results.csv"))
     parser.add_argument("--runs-csv", type=Path, default=Path("cloud_benchmark_runs.csv"))
@@ -324,15 +324,15 @@ def main() -> int:
     )
 
     if args.suite in {"all", "keyword"}:
-        run_series(config, "cloud_encrypt", "encrypt_bundle_ms", "keyword_count", KEYWORD_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_encrypt)
-        run_series(config, "cloud_search", "candidate_generation_ms", "keyword_count", KEYWORD_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_search)
-        run_series(config, "cloud_trapdoor", "trapdoor_gen_ms", "keyword_count", KEYWORD_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_trapdoor)
+        run_series(config, "edge_node_encrypt", "encrypt_bundle_ms", "keyword_count", KEYWORD_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_encrypt)
+        run_series(config, "cs_search", "candidate_generation_ms", "keyword_count", KEYWORD_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_search)
+        run_series(config, "ta_trapdoor_generation", "trapdoor_gen_ms", "keyword_count", KEYWORD_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_trapdoor)
 
     if args.suite in {"all", "keygen"}:
-        run_series(config, "cloud_keygen", "keygen_ms", "attribute_count", ATTRIBUTE_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_keygen)
+        run_series(config, "ta_key_generation", "keygen_ms", "attribute_count", ATTRIBUTE_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_keygen)
 
     if args.suite in {"all", "revoke"}:
-        run_series(config, "cloud_revoke", "update_token_write_ms", "user_count", USER_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_revoke)
+        run_series(config, "ta_update_token_write", "update_token_write_ms", "user_count", USER_COUNTS, args.repeats, args.averages_csv, args.runs_csv, benchmark_revoke)
 
     print(f"Averages appended to {args.averages_csv}")
     print(f"Per-run rows appended to {args.runs_csv}")
