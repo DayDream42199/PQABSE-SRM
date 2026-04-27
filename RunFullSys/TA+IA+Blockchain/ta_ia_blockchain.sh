@@ -105,7 +105,8 @@ run_revoke() {
 run_revoke_raw() {
   require_build
   local gid="${1:?usage: ta_ia_blockchain.sh revoke-raw <gid>}"
-  "$BUILD_DIR/phase5_revoke" --gid "$gid"
+  shift
+  "$BUILD_DIR/phase5_revoke" --gid "$gid" "$@"
 }
 
 prepare_query_dir() {
@@ -115,11 +116,26 @@ prepare_query_dir() {
   shift 2
 
   local label=""
+  local extras=()
+  local keywords=()
   if [[ "$#" -gt 0 ]]; then
     label="${1:-}"
     shift
   fi
-  if [[ "$#" -eq 0 ]]; then
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == --* ]]; then
+      extras+=("$1")
+      shift
+      if [[ "$#" -gt 0 && "$1" != --* ]]; then
+        extras+=("$1")
+        shift
+      fi
+    else
+      keywords+=("$1")
+      shift
+    fi
+  done
+  if [[ "${#keywords[@]}" -eq 0 ]]; then
     echo "prepare-query-dir requires at least one keyword" >&2
     exit 1
   fi
@@ -130,9 +146,10 @@ prepare_query_dir() {
   fi
 
   local keyword
-  for keyword in "$@"; do
+  for keyword in "${keywords[@]}"; do
     args+=(--query-keyword "$keyword")
   done
+  args+=("${extras[@]}")
   "${args[@]}"
 }
 

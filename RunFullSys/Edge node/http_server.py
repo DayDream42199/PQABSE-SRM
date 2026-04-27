@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+import csv
 import io
 import json
 import os
 import subprocess
 import tarfile
+import tempfile
 import urllib.error
 import urllib.request
 from http import HTTPStatus
@@ -32,6 +34,14 @@ def make_tar_bytes(paths):
             if path.exists():
                 tar.add(path, arcname=arcname)
     return buffer.getvalue()
+
+
+def read_last_csv_row(path: Path):
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    return rows[-1] if rows else None
 
 
 class EdgeHandler(BaseHTTPRequestHandler):
@@ -151,18 +161,23 @@ class EdgeHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "state sync failed", "stderr": sync_result.stderr})
                 return
 
-            args = [
-                "encrypt-raw",
-                owner_gid,
-                label,
-                plaintext,
-                policy_type,
-                str(threshold),
-                ",".join(item.strip() for item in keywords),
-                ",".join(item.strip() for item in policy_attrs),
-                policy_expression,
-            ]
-            encrypt_result = self._run_script(*args)
+            with tempfile.TemporaryDirectory(prefix="pqabse-mobile-encrypt-") as temp_dir_name:
+                metrics_path = Path(temp_dir_name) / "edge_metrics.csv"
+                args = [
+                    "encrypt-raw",
+                    owner_gid,
+                    label,
+                    plaintext,
+                    policy_type,
+                    str(threshold),
+                    ",".join(item.strip() for item in keywords),
+                    ",".join(item.strip() for item in policy_attrs),
+                    policy_expression,
+                    "--metrics-out",
+                    str(metrics_path),
+                ]
+                encrypt_result = self._run_script(*args)
+                metrics_row = read_last_csv_row(metrics_path)
             if encrypt_result.returncode != 0:
                 self._send_json(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -194,6 +209,12 @@ class EdgeHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "stdout": encrypt_result.stdout,
                     "stderr": encrypt_result.stderr,
+                    "timings": {
+                        "encrypt_bundle_ms": float(metrics_row["encrypt_bundle_ms"]) if metrics_row and metrics_row.get("encrypt_bundle_ms") else None,
+                        "bundle_write_ms": float(metrics_row["bundle_write_ms"]) if metrics_row and metrics_row.get("bundle_write_ms") else None,
+                        "index_update_ms": float(metrics_row["index_update_ms"]) if metrics_row and metrics_row.get("index_update_ms") else None,
+                        "phase_total_ms": float(metrics_row["phase_total_ms"]) if metrics_row and metrics_row.get("phase_total_ms") else None,
+                    },
                     "blockchain_state": self._load_blockchain_state(),
                     "bundle": bundle_package,
                 },

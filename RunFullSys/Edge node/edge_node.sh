@@ -59,6 +59,7 @@ run_encrypt_raw() {
   local keyword_csv="${6:?usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
   local policy_attr_csv="${7-}"
   local policy_expression="${8:-}"
+  local extra_args=("${@:9}")
 
   if [[ -z "$policy_expression" && -z "$policy_attr_csv" ]]; then
     echo "usage: edge_node.sh encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]" >&2
@@ -93,6 +94,7 @@ run_encrypt_raw() {
     args+=(--policy-expression "$policy_expression")
   fi
 
+  args+=("${extra_args[@]}")
   args+=("${tee_args[@]}")
   "${args[@]}"
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+import csv
 import io
 import json
 import os
@@ -42,6 +43,25 @@ def tar_directory_bytes(directory: Path) -> bytes:
         for child in sorted(directory.iterdir()):
             tar.add(child, arcname=child.name)
     return buffer.getvalue()
+
+
+def parse_stdout_metric(stdout: str, prefix: str):
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if line.startswith(prefix):
+            try:
+                return float(line.split(":", 1)[1].strip())
+            except ValueError:
+                return None
+    return None
+
+
+def read_last_csv_row(path: Path):
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    return rows[-1] if rows else None
 
 
 class TaHandler(BaseHTTPRequestHandler):
@@ -289,6 +309,9 @@ class TaHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "stdout": result.stdout,
                     "stderr": result.stderr,
+                    "timings": {
+                        "keygen_ms": parse_stdout_metric(result.stdout, "Keygen ms:"),
+                    },
                     "user": user_package,
                     "phase1_params_base64": self._read_runtime_base64("abse/phase1_params.txt"),
                     "blockchain_state": self._load_blockchain_state(),
@@ -336,6 +359,9 @@ class TaHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "stdout": result.stdout,
                     "stderr": result.stderr,
+                    "timings": {
+                        "keygen_ms": parse_stdout_metric(result.stdout, "Keygen ms:"),
+                    },
                     "user": user_package,
                     "phase1_params_base64": self._read_runtime_base64("abse/phase1_params.txt"),
                     "blockchain_state": self._load_blockchain_state(),
@@ -350,8 +376,11 @@ class TaHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing field: revoked_gid"})
                 return
 
-            args = ["revoke-raw", revoked_gid]
-            result = self._run_script(*args)
+            with tempfile.TemporaryDirectory(prefix="pqabse-mobile-revoke-") as temp_dir_name:
+                metrics_path = Path(temp_dir_name) / "revoke_metrics.csv"
+                args = ["revoke-raw", revoked_gid, "--metrics-out", str(metrics_path)]
+                result = self._run_script(*args)
+                metrics_row = read_last_csv_row(metrics_path)
             if result.returncode != 0:
                 self._send_json(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -370,6 +399,12 @@ class TaHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "stdout": result.stdout,
                     "stderr": result.stderr,
+                    "timings": {
+                        "revoke_ms": float(metrics_row["revoke_ms"]) if metrics_row and metrics_row.get("revoke_ms") else None,
+                        "rekey_material_ms": float(metrics_row["rekey_material_ms"]) if metrics_row and metrics_row.get("rekey_material_ms") else None,
+                        "update_token_write_ms": float(metrics_row["update_token_write_ms"]) if metrics_row and metrics_row.get("update_token_write_ms") else None,
+                        "phase_total_ms": float(metrics_row["phase_total_ms"]) if metrics_row and metrics_row.get("phase_total_ms") else None,
+                    },
                     "revoked_gid": revoked_gid,
                     "blockchain_state": self._load_blockchain_state(),
                     "cloud_rekey_state": self._load_cloud_rekey_state(),
@@ -391,7 +426,16 @@ class TaHandler(BaseHTTPRequestHandler):
             with tempfile.TemporaryDirectory(prefix="pqabse-mobile-query-") as temp_dir_name:
                 request_dir = Path(temp_dir_name) / "request"
                 request_dir.mkdir()
-                args = ["prepare-query-dir", gid, str(request_dir), preferred_label, *[item.strip() for item in keywords]]
+                trapdoor_timing_path = Path(temp_dir_name) / "trapdoor_ms.txt"
+                args = [
+                    "prepare-query-dir",
+                    gid,
+                    str(request_dir),
+                    preferred_label,
+                    *[item.strip() for item in keywords],
+                    "--trapdoor-timing-out",
+                    str(trapdoor_timing_path),
+                ]
                 result = self._run_script(*args)
                 if result.returncode != 0:
                     self._send_json(
@@ -426,6 +470,11 @@ class TaHandler(BaseHTTPRequestHandler):
                         "stdout": result.stdout,
                         "stderr": result.stderr,
                         "query_package": query_package,
+                        "timings": {
+                            "trapdoor_gen_ms": float(trapdoor_timing_path.read_text(encoding="utf-8").strip())
+                            if trapdoor_timing_path.exists()
+                            else parse_stdout_metric(result.stdout, "Trapdoor generation ms:"),
+                        },
                         "request_archive_base64": base64.b64encode(tar_directory_bytes(request_dir)).decode("ascii"),
                         "phase1_params_base64": self._read_runtime_base64("abse/phase1_params.txt"),
                         "blockchain_state": self._load_blockchain_state(),

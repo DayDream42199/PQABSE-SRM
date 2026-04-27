@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+import csv
 import io
 import json
 import os
@@ -40,6 +41,14 @@ def tar_directory(directory: Path) -> bytes:
 def extract_tar_bytes(payload: bytes, destination: Path):
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as tar:
         tar.extractall(destination)
+
+
+def read_last_csv_row(path: Path):
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    return rows[-1] if rows else None
 
 
 class CsHandler(BaseHTTPRequestHandler):
@@ -202,7 +211,14 @@ class CsHandler(BaseHTTPRequestHandler):
                 extract_tar_bytes(archive_bytes, request_dir)
                 self._rewrite_request_auth_paths(request_dir)
 
-                result = self._run_script("process-query-dir", str(request_dir), str(response_dir))
+                candidate_timing = temp_dir / "candidate_ms.txt"
+                result = self._run_script(
+                    "process-query-dir",
+                    str(request_dir),
+                    str(response_dir),
+                    "--candidate-timing-out",
+                    str(candidate_timing),
+                )
                 if result.returncode != 0:
                     self._send_json(
                         HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -221,6 +237,11 @@ class CsHandler(BaseHTTPRequestHandler):
                         "status": "ok",
                         "stdout": result.stdout,
                         "stderr": result.stderr,
+                        "timings": {
+                            "candidate_generation_ms": float(candidate_timing.read_text(encoding="utf-8").strip())
+                            if candidate_timing.exists()
+                            else None,
+                        },
                         "blockchain_state": self._load_blockchain_state(),
                         "result": self._load_mobile_response(response_dir),
                     },
@@ -339,7 +360,15 @@ class CsHandler(BaseHTTPRequestHandler):
                         auth_token_values["public_file_path"] = str(request_dir / "public.json")
                     write_key_values(request_dir / "auth_token.txt", auth_token_values)
 
-                result = self._run_script("process-query-dir", str(request_dir), str(response_dir), "--skip-auth-verification")
+                candidate_timing = temp_dir / "candidate_ms.txt"
+                result = self._run_script(
+                    "process-query-dir",
+                    str(request_dir),
+                    str(response_dir),
+                    "--skip-auth-verification",
+                    "--candidate-timing-out",
+                    str(candidate_timing),
+                )
                 if result.returncode != 0:
                     self._send_json(
                         HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -358,6 +387,11 @@ class CsHandler(BaseHTTPRequestHandler):
                         "status": "ok",
                         "stdout": result.stdout,
                         "stderr": result.stderr,
+                        "timings": {
+                            "candidate_generation_ms": float(candidate_timing.read_text(encoding="utf-8").strip())
+                            if candidate_timing.exists()
+                            else None,
+                        },
                         "blockchain_state": self._load_blockchain_state(),
                         "result": self._load_mobile_response(response_dir),
                     },
