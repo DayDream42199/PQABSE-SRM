@@ -75,10 +75,10 @@ cmake --build . -j2
 
 These run at keyword counts:
 
-- `20`
+- `10`
+- `50`
 - `300`
 - `500`
-- `1000`
 
 Measured metrics:
 

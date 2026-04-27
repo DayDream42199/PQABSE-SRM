@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-KEYWORD_COUNTS = [20, 300, 500, 1000]
+KEYWORD_COUNTS = [10, 50, 300, 500]
 ATTRIBUTE_COUNTS = [10, 20, 30, 40, 50]
 USER_COUNTS = [10, 20, 30, 40, 50]
 DEFAULT_REPEATS = 5
