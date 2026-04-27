@@ -1,5 +1,7 @@
 #include <iostream>
 
+#include <iomanip>
+
 #include "phase1_setup.h"
 #include "phase2_keygen.h"
 #include "phase4_search.h"
@@ -9,6 +11,7 @@
 #include "system/Artifacts.h"
 #include "system/AuthTokenIO.h"
 #include "system/Cli.h"
+#include "system/ExperimentMetrics.h"
 #include "system/RuntimePaths.h"
 #include "system/TestScenario.h"
 
@@ -35,6 +38,7 @@ int main(int argc, char** argv) {
         }
     }
     const auto request_dir = std::filesystem::path(cli.Require("--out-dir"));
+    const auto trapdoor_timing_out = cli.Get("--trapdoor-timing-out");
 
     IdentityAuthority ia;
     Blockchain.sync_from_chain();
@@ -93,7 +97,9 @@ int main(int argc, char** argv) {
 
     SearchTrapdoor shortlist_trapdoor;
     std::array<unsigned char, 16> global_nonce{};
+    const auto trapdoor_start = Clock::now();
     TrapGen(params, user_key, global_nonce, preferred_label, query_keywords, shortlist_trapdoor);
+    const double trapdoor_gen_ms = ElapsedMilliseconds(trapdoor_start, Clock::now());
 
     std::filesystem::create_directories(request_dir);
     if (!SaveAuthToken(user.get_auth_token(), request_dir / "auth_token.txt")) {
@@ -112,7 +118,16 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to write gid" << std::endl;
         return 12;
     }
+    if (!trapdoor_timing_out.empty()) {
+        std::ostringstream output;
+        output << std::fixed << std::setprecision(3) << trapdoor_gen_ms;
+        if (!WriteTextFile(trapdoor_timing_out, output.str())) {
+            std::cerr << "Failed to write trapdoor generation timing" << std::endl;
+            return 13;
+        }
+    }
 
     std::cout << "Query request prepared at " << request_dir << std::endl;
+    std::cout << "Trapdoor generation ms: " << std::fixed << std::setprecision(3) << trapdoor_gen_ms << std::endl;
     return 0;
 }
