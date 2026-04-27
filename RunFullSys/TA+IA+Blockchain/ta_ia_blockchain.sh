@@ -181,12 +181,12 @@ case "$cmd" in
   refresh) run_refresh "${2:-}" ;;
   refresh-raw) run_refresh_raw "${2:-}" ;;
   revoke) run_revoke "${2:-}" ;;
-  revoke-raw) run_revoke_raw "${2:-}" ;;
+  revoke-raw) shift; run_revoke_raw "$@" ;;
   prepare-query-dir) shift; prepare_query_dir "$@" ;;
   prepare-auth-dir) shift; prepare_auth_dir "$@" ;;
   serve-http) serve_http "$@" ;;
   *)
-    echo "Usage: $0 {setup|register <user>|register-raw <gid> <attr> [attr ...]|refresh <user>|refresh-raw <gid>|revoke <revocation>|revoke-raw <gid>|prepare-query-dir <gid> <out-dir> [label] <keyword> [keyword ...]|prepare-auth-dir <gid> <out-dir> [label]|serve-http [host] [port]}" >&2
+    echo "Usage: $0 {setup|register <user>|register-raw <gid> <attr> [attr ...]|refresh <user>|refresh-raw <gid>|revoke <revocation>|revoke-raw <gid> [--metrics-out <csv>]|prepare-query-dir <gid> <out-dir> [label] <keyword> [keyword ...]|prepare-auth-dir <gid> <out-dir> [label]|serve-http [host] [port]}" >&2
     exit 1
     ;;
 esac
