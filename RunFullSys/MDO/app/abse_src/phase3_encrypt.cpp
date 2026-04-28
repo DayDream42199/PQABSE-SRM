@@ -789,17 +789,11 @@ std::vector<TrapdoorElement> BuildSecureIndex(const SystemParams& params,
 void AssembleCiphertextBundle(const SystemParams& params, const PK& pk, const std::string& bundle_label,
                               const std::string& plaintext, const std::vector<std::string>& keywords,
                               const LogicalPolicy& logical_policy, const std::string& version_tag,
-                              CiphertextBundle& bundle) {
+                              CiphertextBundle& bundle, double* mobile_encrypt_ms) {
+    const auto mobile_encrypt_start = std::chrono::high_resolution_clock::now();
     const auto session_key = GenerateSessionKey();
     if (!EncryptData(session_key, plaintext, bundle.nonce, bundle.ctdata, bundle.auth_tag)) {
         throw std::runtime_error("ChaCha20-Poly1305 encryption failed");
-    }
-
-    std::string decrypted;
-    bundle.ctdata_verified = DecryptData(session_key, bundle.nonce, bundle.ctdata, bundle.auth_tag, decrypted) &&
-                             decrypted == plaintext;
-    if (!bundle.ctdata_verified) {
-        throw std::runtime_error("ChaCha20-Poly1305 round-trip verification failed");
     }
 
     bundle.bundle_label = bundle_label;
@@ -812,6 +806,19 @@ void AssembleCiphertextBundle(const SystemParams& params, const PK& pk, const st
     }
 
     EncABSE(params, pk, session_key, bundle.policy, bundle.version_tag, bundle.file_nonce, "", "", bundle.ctk);
+    if (mobile_encrypt_ms != nullptr) {
+        const auto mobile_encrypt_end = std::chrono::high_resolution_clock::now();
+        *mobile_encrypt_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+                                 mobile_encrypt_end - mobile_encrypt_start)
+                                 .count();
+    }
+
+    std::string decrypted;
+    bundle.ctdata_verified = DecryptData(session_key, bundle.nonce, bundle.ctdata, bundle.auth_tag, decrypted) &&
+                             decrypted == plaintext;
+    if (!bundle.ctdata_verified) {
+        throw std::runtime_error("ChaCha20-Poly1305 round-trip verification failed");
+    }
     bundle.secure_index = BuildSecureIndex(params, bundle.keyword_set, bundle.file_nonce);
 }
 
@@ -925,7 +932,6 @@ bool LoadCiphertextBundle(const SystemParams& params, CiphertextBundle& bundle, 
     in.read(reinterpret_cast<char*>(&ring_dim), sizeof(ring_dim));
     return static_cast<bool>(in) && ring_dim == params.ring_dim;
 }
-
 
 
 
