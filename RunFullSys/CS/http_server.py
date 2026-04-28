@@ -127,12 +127,39 @@ class CsHandler(BaseHTTPRequestHandler):
         bundle_dir = response_dir / "bundles"
         bundles = []
         if bundle_dir.exists():
-            for bundle_bin in sorted(bundle_dir.glob("*_bundle.bin")):
-                label = bundle_bin.name[:-len("_bundle.bin")]
+            ordered_labels = []
+            matched_counts = {}
+            order_path = response_dir / "bundle_order.txt"
+            if order_path.exists():
+                for raw_line in order_path.read_text(encoding="utf-8").splitlines():
+                    if not raw_line.strip():
+                        continue
+                    parts = raw_line.split("\t", 1)
+                    label = parts[0].strip()
+                    if not label:
+                        continue
+                    ordered_labels.append(label)
+                    if len(parts) > 1:
+                        try:
+                            matched_counts[label] = int(parts[1].strip())
+                        except ValueError:
+                            matched_counts[label] = None
+
+            if not ordered_labels:
+                ordered_labels = [
+                    bundle_bin.name[:-len("_bundle.bin")]
+                    for bundle_bin in sorted(bundle_dir.glob("*_bundle.bin"))
+                ]
+
+            for label in ordered_labels:
+                bundle_bin = bundle_dir / f"{label}_bundle.bin"
+                if not bundle_bin.exists():
+                    continue
                 bundle_meta = bundle_dir / f"{label}_bundle.meta"
                 bundles.append(
                     {
                         "bundle_label": label,
+                        "matched_count": matched_counts.get(label),
                         "bundle_meta": load_key_values(bundle_meta),
                         "bundle_bin_base64": base64.b64encode(bundle_bin.read_bytes()).decode("ascii"),
                         "bundle_meta_base64": base64.b64encode(bundle_meta.read_bytes()).decode("ascii")

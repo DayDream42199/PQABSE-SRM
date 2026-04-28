@@ -287,17 +287,20 @@ int main(int argc, char** argv) {
     });
 
     const std::size_t returned_count = std::min(max_results, ranked_matches.size());
+    std::ostringstream ordered_bundle_manifest;
     for (std::size_t index = 0; index < returned_count; ++index) {
         const auto& match = ranked_matches[index];
         const auto response_bundle_path = response_dir / "bundles" / (match.label + "_bundle.bin");
         const auto response_meta_path = response_dir / "bundles" / (match.label + "_bundle.meta");
         std::filesystem::copy_file(match.record.bundle_path, response_bundle_path, std::filesystem::copy_options::overwrite_existing);
         std::filesystem::copy_file(BundleMetaPath(match.label), response_meta_path, std::filesystem::copy_options::overwrite_existing);
+        ordered_bundle_manifest << match.label << "\t" << match.matched_count << "\n";
     }
 
     WriteTextFile(response_dir / "candidate_count.txt", std::to_string(candidate_count));
     WriteTextFile(response_dir / "exact_match_count.txt", std::to_string(returned_count));
     WriteTextFile(response_dir / "epoch.txt", std::to_string(Blockchain.current_state.epoch));
+    WriteTextFile(response_dir / "bundle_order.txt", ordered_bundle_manifest.str());
     if (!candidate_timing_out.empty()) {
         std::ostringstream output;
         output << std::fixed << std::setprecision(3) << candidate_generation_ms;
