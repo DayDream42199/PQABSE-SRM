@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
     const std::vector<std::string> metrics_header = {
         "phase", "scenario_user", "scenario_bundle", "scenario_query", "gid", "bundle_label", "epoch",
         "attribute_count", "policy_attribute_count", "keyword_count", "keygen_ms", "encrypt_bundle_ms",
+        "mobile_encrypt_ms",
         "trapdoor_gen_ms", "decrypt_ms", "phase_total_ms", "user_key_bytes", "ciphertext_bytes",
         "ciphertext_meta_bytes", "plaintext_recovered"
     };
@@ -165,6 +166,7 @@ int main(int argc, char** argv) {
 
     CiphertextBundle bundle;
     const auto encrypt_start = Clock::now();
+    double mobile_encrypt_ms = 0.0;
     tee.CreateCiphertextBundle(params,
                                pk,
                                bundle_label,
@@ -172,7 +174,8 @@ int main(int argc, char** argv) {
                                keywords,
                                logical_policy,
                                "epoch-" + std::to_string(Blockchain.current_state.epoch),
-                               bundle);
+                               bundle,
+                               &mobile_encrypt_ms);
     const double encrypt_bundle_ms = ElapsedMilliseconds(encrypt_start, Clock::now());
     const auto bundle_path = BundleBinaryPath(bundle_label);
     if (!SaveCiphertextBundle(params, bundle, bundle_path.string())) {
@@ -227,6 +230,7 @@ int main(int argc, char** argv) {
                             ToCsvField(static_cast<uintmax_t>(keywords.size())),
                             ToCsvField(keygen_ms),
                             ToCsvField(encrypt_bundle_ms),
+                            ToCsvField(mobile_encrypt_ms),
                             ToCsvField(trapdoor_gen_ms),
                             ToCsvField(decrypt_ms),
                             ToCsvField(ElapsedMilliseconds(phase_start, Clock::now())),
@@ -241,6 +245,7 @@ int main(int argc, char** argv) {
               << " bundle=" << bundle_label
               << " keygen_ms=" << keygen_ms
               << " encrypt_ms=" << encrypt_bundle_ms
+              << " mobile_encrypt_ms=" << mobile_encrypt_ms
               << " decrypt_ms=" << decrypt_ms
               << " user_key_bytes=" << FileSizeOrZero(user_key_path)
               << " ciphertext_bytes=" << FileSizeOrZero(bundle_path)

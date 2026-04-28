@@ -31,6 +31,7 @@ REVOCATION_USER_COUNTS = [10, 20, 30, 40, 50]
 RUNS_PER_POINT = 5
 SEARCH_FILE_COUNT = 100
 SEARCH_QUERY_KEYWORDS = 5
+SEARCH_KEYWORD_COUNT_JITTER_RATIO = 0.10
 
 COMMON_BAND_RATIO = 0.05
 MEDIUM_BAND_RATIO = 0.20
@@ -79,17 +80,22 @@ def sample_keywords_without_replacement(pool: list[str], count: int, rng: random
     return rng.sample(pool, min(len(pool), count))
 
 
-def corpus_keywords(keyword_count: int, file_count: int, seed: int) -> tuple[list[list[str]], list[str]]:
+def per_doc_keyword_target(keyword_count: int, rng: random.Random | None = None, jitter_ratio: float = 0.0) -> int:
+    base_keywords_per_doc = min(keyword_count, max(8, keyword_count // 20))
+    if rng is None or jitter_ratio <= 0.0:
+        return base_keywords_per_doc
+    jitter = max(1, int(round(base_keywords_per_doc * jitter_ratio)))
+    lower = max(1, base_keywords_per_doc - jitter)
+    upper = min(keyword_count, base_keywords_per_doc + jitter)
+    if upper <= lower:
+        return lower
+    return rng.randint(lower, upper)
+
+
+def corpus_keywords(keyword_count: int, file_count: int, seed: int,
+                    per_doc_jitter_ratio: float = 0.0) -> tuple[list[list[str]], list[str]]:
     pool = keywords(keyword_count)
     common, medium, rare, selective = split_keyword_bands(pool)
-    keywords_per_doc = min(keyword_count, max(8, keyword_count // 20))
-    common_per_doc = min(len(common), max(1, int(keywords_per_doc * COMMON_PER_DOC_RATIO)))
-    medium_per_doc = min(len(medium), max(1, int(keywords_per_doc * MEDIUM_PER_DOC_RATIO)))
-    rare_per_doc = min(
-        len(rare),
-        max(1, int(keywords_per_doc * RARE_PER_DOC_RATIO)),
-    )
-    selective_per_doc = max(1, keywords_per_doc - common_per_doc - medium_per_doc - rare_per_doc)
 
     bundles: list[list[str]] = []
     master_rng = random.Random(seed)
@@ -97,6 +103,14 @@ def corpus_keywords(keyword_count: int, file_count: int, seed: int) -> tuple[lis
     selective_bucket_width = max(1, len(selective) // cluster_count)
     for doc_idx in range(file_count):
         doc_rng = random.Random(master_rng.randint(0, 1_000_000_000) ^ doc_idx)
+        keywords_per_doc = per_doc_keyword_target(keyword_count, doc_rng, per_doc_jitter_ratio)
+        common_per_doc = min(len(common), max(1, int(keywords_per_doc * COMMON_PER_DOC_RATIO)))
+        medium_per_doc = min(len(medium), max(1, int(keywords_per_doc * MEDIUM_PER_DOC_RATIO)))
+        rare_per_doc = min(
+            len(rare),
+            max(1, int(keywords_per_doc * RARE_PER_DOC_RATIO)),
+        )
+        selective_per_doc = max(1, keywords_per_doc - common_per_doc - medium_per_doc - rare_per_doc)
         doc_keywords: set[str] = set()
         doc_keywords.update(sample_keywords_without_replacement(common, common_per_doc, doc_rng))
         doc_keywords.update(sample_keywords_without_replacement(medium, medium_per_doc, doc_rng))
@@ -124,6 +138,18 @@ def corpus_keywords(keyword_count: int, file_count: int, seed: int) -> tuple[lis
         )
     )
     return bundles, query_keywords
+
+
+def explicit_file_keywords(keyword_count: int) -> list[str]:
+    return keywords(keyword_count)
+
+
+def explicit_query_keywords(keyword_count: int) -> list[str]:
+    return keywords(keyword_count)
+
+
+def fixed_match_query_keywords(file_keywords: list[str], query_keyword_count: int = SEARCH_QUERY_KEYWORDS) -> list[str]:
+    return file_keywords[:min(query_keyword_count, len(file_keywords))]
 
 
 def role_app_dir(role: str) -> Path:
@@ -331,7 +357,7 @@ def run_encryption_experiment():
             register_user("mdo", "owner_local", policy_attrs, None)
             local_values.append(
                 encrypt_bundle("mdo", "owner_local", f"local_bundle_{keyword_count}_{run_idx}", "payload",
-                               policy_type, threshold, policy_attrs, keywords(keyword_count))
+                               policy_type, threshold, policy_attrs, explicit_file_keywords(keyword_count))
             )
         append_csv(csv_path, {
             "experiment": "full_encryption",
@@ -350,7 +376,12 @@ def setup_search_stack(keyword_count: int):
     register_user(role, "search_user", FIXED_POLICIES[0][2], None)
     register_user(role, "owner_search", FIXED_POLICIES[0][2], None)
     policy_type, threshold, policy_attrs = FIXED_POLICIES[0]
-    corpus, query_keywords = corpus_keywords(keyword_count, SEARCH_FILE_COUNT, seed=keyword_count * 7919 + 17)
+    corpus, query_keywords = corpus_keywords(
+        keyword_count,
+        SEARCH_FILE_COUNT,
+        seed=keyword_count * 7919 + 17,
+        per_doc_jitter_ratio=SEARCH_KEYWORD_COUNT_JITTER_RATIO,
+    )
     for index in range(SEARCH_FILE_COUNT):
         encrypt_bundle(
             role,
@@ -387,7 +418,7 @@ def run_trapdoor_experiment():
             reset_all_runtimes()
             setup_role("mdu")
             register_user("mdu", "trap_user", FIXED_POLICIES[0][2], None)
-            _, query_keywords = corpus_keywords(keyword_count, SEARCH_FILE_COUNT, seed=keyword_count * 6151 + run_idx)
+            query_keywords = explicit_query_keywords(keyword_count)
             request_dir, timing_path = prepare_query("mdu", "trap_user", "preferred_bundle", query_keywords,
                                                      f"trapdoor_{keyword_count}_{run_idx}")
             values.append(read_timing(timing_path))
@@ -407,8 +438,8 @@ def run_decryption_experiment():
             setup_role("mdu")
             register_user("mdu", "decrypt_user", policy_attrs, None)
             register_user("mdu", "owner_decrypt", policy_attrs, None)
-            corpus, query_keywords = corpus_keywords(keyword_count, 1, seed=keyword_count * 4253 + run_idx)
-            kw_list = corpus[0]
+            kw_list = explicit_file_keywords(keyword_count)
+            query_keywords = fixed_match_query_keywords(kw_list)
             label = f"decrypt_bundle_{keyword_count}_{run_idx}"
             encrypt_bundle("mdu", "owner_decrypt", label, "payload", policy_type, threshold, policy_attrs, kw_list)
             request_dir, _ = prepare_query("mdu", "decrypt_user", label, query_keywords, f"decrypt_{keyword_count}_{run_idx}")

@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     const std::vector<std::string> metrics_header = {
         "phase", "gid", "owner_gid", "revoked_gid", "preferred_label", "matched_label", "bundle_label",
         "epoch", "keyword_count", "query_keyword_count", "candidate_count", "active_user_count",
-        "cache_hit", "search_success", "encrypt_bundle_ms", "bundle_write_ms", "index_update_ms",
+        "cache_hit", "search_success", "encrypt_bundle_ms", "mobile_encrypt_ms", "bundle_write_ms", "index_update_ms",
         "trapdoor_gen_ms", "auth_verify_ms", "index_prepare_ms", "candidate_prune_ms",
         "retrieve_decrypt_ms", "revoke_ms", "rekey_material_ms", "update_token_write_ms",
         "phase_total_ms", "bundle_bytes", "bundle_meta_bytes", "bitmap_index_bytes",
@@ -69,7 +69,16 @@ int main(int argc, char** argv) {
     CiphertextBundle bundle;
     const auto phase_start = Clock::now();
     const auto encrypt_start = Clock::now();
-    tee.CreateCiphertextBundle(params, pk, label, plaintext, keywords, logical_policy, "epoch-" + std::to_string(Blockchain.current_state.epoch), bundle);
+    double mobile_encrypt_ms = 0.0;
+    tee.CreateCiphertextBundle(params,
+                               pk,
+                               label,
+                               plaintext,
+                               keywords,
+                               logical_policy,
+                               "epoch-" + std::to_string(Blockchain.current_state.epoch),
+                               bundle,
+                               &mobile_encrypt_ms);
     const double encrypt_bundle_ms = ElapsedMilliseconds(encrypt_start, Clock::now());
     const auto bundle_path = BundleBinaryPath(label);
     const auto write_start = Clock::now();
@@ -132,6 +141,7 @@ int main(int argc, char** argv) {
                             ToCsvField(""),
                             ToCsvField(""),
                             ToCsvField(encrypt_bundle_ms),
+                            ToCsvField(mobile_encrypt_ms),
                             ToCsvField(bundle_write_ms),
                             ToCsvField(index_update_ms),
                             ToCsvField(""),

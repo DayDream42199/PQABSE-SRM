@@ -26,7 +26,8 @@ public:
                                 const std::vector<std::string>& keywords,
                                 const LogicalPolicy& logical_policy,
                                 const std::string& version_tag,
-                                CiphertextBundle& bundle) const;
+                                CiphertextBundle& bundle,
+                                double* mobile_encrypt_ms = nullptr) const;
 };
 
 LogicalPolicy BuildLogicalPolicyFromParts(const std::string& policy_type,

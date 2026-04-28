@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
     const std::vector<std::string> metrics_header = {
         "phase", "gid", "owner_gid", "revoked_gid", "preferred_label", "matched_label", "bundle_label",
         "epoch", "keyword_count", "query_keyword_count", "candidate_count", "active_user_count",
-        "cache_hit", "search_success", "encrypt_bundle_ms", "bundle_write_ms", "index_update_ms",
+        "cache_hit", "search_success", "encrypt_bundle_ms", "mobile_encrypt_ms", "bundle_write_ms", "index_update_ms",
         "trapdoor_gen_ms", "auth_verify_ms", "index_prepare_ms", "candidate_prune_ms",
         "retrieve_decrypt_ms", "revoke_ms", "rekey_material_ms", "update_token_write_ms",
         "phase_total_ms", "bundle_bytes", "bundle_meta_bytes", "bitmap_index_bytes",
@@ -75,6 +75,7 @@ int main(int argc, char** argv) {
                             ToCsvField(""),
                             ToCsvField(""),
                             ToCsvField(active_user_count),
+                            ToCsvField(""),
                             ToCsvField(""),
                             ToCsvField(""),
                             ToCsvField(""),

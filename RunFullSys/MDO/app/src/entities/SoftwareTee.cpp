@@ -145,8 +145,10 @@ void SoftwareTee::CreateCiphertextBundle(const SystemParams& params,
                                          const std::vector<std::string>& keywords,
                                          const LogicalPolicy& logical_policy,
                                          const std::string& version_tag,
-                                         CiphertextBundle& bundle) const {
-    AssembleCiphertextBundle(params, pk, bundle_label, plaintext, keywords, logical_policy, version_tag, bundle);
+                                         CiphertextBundle& bundle,
+                                         double* mobile_encrypt_ms) const {
+    AssembleCiphertextBundle(
+        params, pk, bundle_label, plaintext, keywords, logical_policy, version_tag, bundle, mobile_encrypt_ms);
 }
 
 LogicalPolicy BuildLogicalPolicyFromParts(const std::string& policy_type,

@@ -1,4 +1,4 @@
-"""Synthetic benchmark runner for the three reference-paper baselines.
+"""Synthetic benchmark runner for the reference-paper baselines.
 
 This script does not attempt full cryptographic reproduction of the cited
 schemes. Instead, it re-implements the benchmark-relevant workloads in a
@@ -8,6 +8,8 @@ metrics inside this repository:
 - ReferenceTestPaper1.txt: encryption, trapdoor generation, search, decryption
 - ReferenceTestPaper4.txt: key generation
 - ReferenceTestPaper5.txt: revocation
+- ReferenceTestPaper8.txt: encryption, trapdoor generation, search, revocation
+- ReferenceTestPaper9.txt: encryption, trapdoor generation, search/test
 
 The operation shapes mirror the papers' experiments:
 - Paper 1 keeps keyword-scaling work roughly constant once keywords fit in the
@@ -52,6 +54,13 @@ PAPER6_VECTOR_DIM = 256
 PAPER6_KEYGEN_ROUNDS = 24
 PAPER6_ENCRYPTION_ROUNDS = 18
 PAPER6_DECRYPTION_ROUNDS = 12
+PAPER8_MATRIX_DIM = 192
+PAPER8_TAG_WIDTH = 12
+PAPER8_CANDIDATE_FACTOR = 4
+PAPER8_PUNCTURE_ROUNDS = 10
+PAPER9_VECTOR_DIM = 224
+PAPER9_TEST_STRING_LEN = 10
+PAPER9_CANDIDATE_FACTOR = 4
 
 COMMON_BAND_RATIO = 0.05
 MEDIUM_BAND_RATIO = 0.20
@@ -66,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run synthetic reference-paper benchmarks.")
     parser.add_argument(
         "--paper",
-        choices=["all", "paper1", "paper4", "paper5", "paper6"],
+        choices=["all", "paper1", "paper4", "paper5", "paper6", "paper8", "paper9"],
         default="all",
         help="Run all reference-paper benchmarks or just one family.",
     )
@@ -339,11 +348,29 @@ def load_or_generate_paper1_corpus(
     }
 
 
+def explicit_indices(keyword_count: int, slots: int) -> list[int]:
+    return list(range(min(keyword_count, slots)))
+
+
+def paper1_build_single_doc(keyword_count: int, run_idx: int) -> tuple[int, dict[str, list[int]], list[int]]:
+    degree = choose_poly_degree(keyword_count)
+    slots = degree // 2
+    rng = random.Random(seed_for(111, keyword_count, run_idx))
+    doc_indices = explicit_indices(keyword_count, slots)
+    encoded = vector_from_indices(slots, doc_indices, rng, 1, 1)
+    noise_a = vector_from_indices(slots, doc_indices, rng, 0, 17)
+    noise_b = vector_from_indices(slots, doc_indices, rng, 0, 17)
+    secret = vector_from_indices(slots, doc_indices, rng, 1, 31)
+    c0 = vec_add(encoded, noise_a)
+    c1 = vec_add(vec_mul(encoded, secret), noise_b)
+    return slots, {"c0": c0, "c1": c1, "secret": secret}, doc_indices
+
+
 def paper1_encrypt(keyword_count: int, run_idx: int) -> float:
     degree = choose_poly_degree(keyword_count)
     slots = degree // 2
     rng = random.Random(seed_for(101, keyword_count, run_idx))
-    active_count = min(slots, max(PAPER1_QUERY_KEYWORDS, keyword_count))
+    active_count = max(1, min(slots, keyword_count))
     payload = make_sparse_vector(slots, active_count, rng)
     secret = make_sparse_vector(slots, active_count, rng, 1, 31)
     mask = make_sparse_vector(slots, active_count, rng, 1, 127)
@@ -363,7 +390,7 @@ def paper1_trapdoor(keyword_count: int, run_idx: int, query_indices: list[int] |
     slots = degree // 2
     rng = random.Random(seed_for(102, keyword_count, run_idx))
     if query_indices is None:
-        query_indices = list(range(min(PAPER1_QUERY_KEYWORDS, keyword_count)))
+        query_indices = explicit_indices(keyword_count, slots)
     query = vector_from_indices(slots, query_indices, rng, 1, 1)
     secret = vector_from_indices(slots, query_indices, rng, 1, 31)
     rekey = vector_from_indices(slots, query_indices, rng, 1, 17)
@@ -378,19 +405,40 @@ def paper1_trapdoor(keyword_count: int, run_idx: int, query_indices: list[int] |
     return elapsed_ms, {"beta0": beta0, "beta1": beta1, "beta2": beta2, "beta3": beta3}
 
 
-def paper1_search_from_corpus(
+def paper1_search_candidate_from_corpus(
     keyword_count: int,
     run_idx: int,
     slots: int,
     corpus: list[dict[str, list[int]]],
     query_indices: list[int],
-) -> tuple[float, list[dict[str, object]]]:
+) -> tuple[float, dict[str, list[int]], list[dict[str, object]]]:
     _, trapdoor = paper1_trapdoor(keyword_count, run_idx, query_indices)
     _ = slots
 
     start = time.perf_counter()
-    ranked: list[tuple[int, int, list[int]]] = []
+    ranked: list[tuple[int, int]] = []
     for doc_idx, doc in enumerate(corpus):
+        score = dot_score(doc["c0"], trapdoor["beta0"])
+        ranked.append((score, doc_idx))
+    candidate_limit = min(len(ranked), max(PAPER1_TOP_K, PAPER1_TOP_K * 4))
+    candidate_rows = heapq.nlargest(candidate_limit, ranked, key=lambda item: item[0])
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    return elapsed_ms, trapdoor, [
+        {"candidate_score": score, "doc_idx": doc_idx}
+        for score, doc_idx in candidate_rows
+    ]
+
+
+def paper1_exact_match_from_candidates(
+    corpus: list[dict[str, list[int]]],
+    trapdoor: dict[str, list[int]],
+    candidate_results: list[dict[str, object]],
+) -> tuple[float, list[dict[str, object]]]:
+    start = time.perf_counter()
+    ranked: list[tuple[int, int, list[int]]] = []
+    for candidate in candidate_results:
+        doc_idx = int(candidate["doc_idx"])
+        doc = corpus[doc_idx]
         left = vec_mul(doc["c0"], trapdoor["beta0"])
         right = vec_mul(doc["c1"], trapdoor["beta1"])
         merged = vec_add(left, right)
@@ -409,15 +457,17 @@ def paper1_search(
     file_count: int,
     run_idx: int,
     cache_dir: Path,
-) -> tuple[float, list[dict[str, object]]]:
+) -> tuple[float, float, list[dict[str, object]]]:
     cached = load_or_generate_paper1_corpus(keyword_count, file_count, run_idx, cache_dir)
-    return paper1_search_from_corpus(
+    candidate_ms, trapdoor, candidate_results = paper1_search_candidate_from_corpus(
         keyword_count,
         run_idx,
         int(cached["slots"]),
         cached["corpus"],
         cached["query_indices"],
     )
+    exact_ms, top_results = paper1_exact_match_from_candidates(cached["corpus"], trapdoor, candidate_results)
+    return candidate_ms, exact_ms, top_results
 
 
 def paper1_decrypt_from_corpus(
@@ -445,15 +495,19 @@ def paper1_decrypt(
     run_idx: int,
     cache_dir: Path,
 ) -> float:
-    cached = load_or_generate_paper1_corpus(keyword_count, file_count, run_idx, cache_dir)
-    _, top_results = paper1_search_from_corpus(
+    _ = file_count
+    _ = cache_dir
+    slots, doc, doc_indices = paper1_build_single_doc(keyword_count, run_idx)
+    query_indices = doc_indices[: min(PAPER1_QUERY_KEYWORDS, len(doc_indices))]
+    _, trapdoor, candidate_results = paper1_search_candidate_from_corpus(
         keyword_count,
         run_idx,
-        int(cached["slots"]),
-        cached["corpus"],
-        cached["query_indices"],
+        slots,
+        [doc],
+        query_indices,
     )
-    return paper1_decrypt_from_corpus(keyword_count, run_idx, cached["query_indices"], top_results)
+    _, top_results = paper1_exact_match_from_candidates([doc], trapdoor, candidate_results)
+    return paper1_decrypt_from_corpus(keyword_count, run_idx, query_indices, top_results)
 
 
 def simulate_paper4_keygen(attribute_count: int, run_idx: int) -> float:
@@ -583,6 +637,223 @@ def paper6_decrypt(keyword_count: int, run_idx: int) -> float:
     return (time.perf_counter() - start) * 1000.0
 
 
+def paper8_explicit_indices(keyword_count: int) -> list[int]:
+    return list(range(max(1, keyword_count)))
+
+
+def paper8_encrypt(keyword_count: int, run_idx: int) -> float:
+    slot_count = max(PAPER8_MATRIX_DIM, keyword_count + PAPER8_TAG_WIDTH)
+    rng = random.Random(seed_for(801, keyword_count, run_idx))
+    keyword_indices = [index % slot_count for index in paper8_explicit_indices(keyword_count)]
+    tag_indices = [((keyword_count * 7) + offset) % slot_count for offset in range(PAPER8_TAG_WIDTH)]
+    keyword_vec = vector_from_indices(slot_count, keyword_indices, rng, 1, 3)
+    tag_vec = vector_from_indices(slot_count, tag_indices, rng, 1, 5)
+    public_base = make_sparse_vector(slot_count, min(slot_count, keyword_count + PAPER8_TAG_WIDTH), rng, 1, 31)
+    noise = make_sparse_vector(slot_count, min(slot_count, keyword_count + PAPER8_TAG_WIDTH), rng, 0, 11)
+
+    start = time.perf_counter()
+    c0 = vec_add(vec_mul(keyword_vec, public_base), noise)
+    c1 = vec_add(vec_mul(tag_vec, rotate(public_base, 3)), scalar_mix(keyword_vec, 5))
+    mix = vec_add(c0, rotate(c1, 7))
+    for round_idx in range(4):
+        mix = vec_add(mix, scalar_mix(rotate(tag_vec, round_idx + 1), round_idx + 2))
+    _ = dot_score(mix, public_base)
+    return (time.perf_counter() - start) * 1000.0
+
+
+def paper8_trapdoor(keyword_count: int, run_idx: int, query_indices: list[int] | None = None) -> tuple[float, dict[str, list[int]]]:
+    slot_count = max(PAPER8_MATRIX_DIM, keyword_count + PAPER8_TAG_WIDTH)
+    rng = random.Random(seed_for(802, keyword_count, run_idx))
+    if query_indices is None:
+        query_indices = [index % slot_count for index in paper8_explicit_indices(keyword_count)]
+    puncture_indices = [((keyword_count * 11) + offset) % slot_count for offset in range(PAPER8_TAG_WIDTH)]
+    query_vec = vector_from_indices(slot_count, query_indices, rng, 1, 3)
+    puncture_vec = vector_from_indices(slot_count, puncture_indices, rng, 1, 7)
+    lattice_basis = make_sparse_vector(slot_count, min(slot_count, keyword_count + PAPER8_TAG_WIDTH), rng, 1, 29)
+
+    start = time.perf_counter()
+    beta0 = vec_add(query_vec, scalar_mix(puncture_vec, 3))
+    beta1 = vec_add(vec_mul(beta0, lattice_basis), rotate(puncture_vec, 5))
+    beta2 = vec_add(beta1, scalar_mix(query_vec, 7))
+    permit = vec_add(beta2, rotate(beta0, 9))
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    return elapsed_ms, {"beta0": beta0, "beta1": beta1, "beta2": beta2, "permit": permit}
+
+
+def paper8_build_corpus(keyword_count: int, file_count: int, run_idx: int) -> tuple[int, list[dict[str, object]], list[list[int]]]:
+    slot_count = max(PAPER8_MATRIX_DIM, keyword_count + PAPER8_TAG_WIDTH)
+    rng = random.Random(seed_for(803, keyword_count, run_idx))
+    corpus_indices = banded_keyword_indices(keyword_count, file_count, run_idx)
+    corpus: list[dict[str, object]] = []
+    for doc_idx in range(file_count):
+        doc_rng = random.Random(rng.randint(0, 1_000_000_000) ^ (doc_idx * 19 + 5))
+        keyword_indices = [index % slot_count for index in corpus_indices[doc_idx]]
+        tag_indices = [((doc_idx * 13) + offset) % slot_count for offset in range(PAPER8_TAG_WIDTH)]
+        keyword_vec = vector_from_indices(slot_count, keyword_indices, doc_rng, 1, 3)
+        tag_vec = vector_from_indices(slot_count, tag_indices, doc_rng, 1, 5)
+        base = make_sparse_vector(slot_count, min(slot_count, len(keyword_indices) + PAPER8_TAG_WIDTH), doc_rng, 1, 31)
+        c0 = vec_add(vec_mul(keyword_vec, base), tag_vec)
+        c1 = vec_add(vec_mul(tag_vec, rotate(base, 3)), scalar_mix(keyword_vec, 5))
+        corpus.append({"c0": c0, "c1": c1, "tags": tag_indices, "keywords": keyword_indices})
+    return slot_count, corpus, corpus_indices
+
+
+def paper8_search_candidate_from_corpus(
+    keyword_count: int,
+    file_count: int,
+    run_idx: int,
+) -> tuple[float, dict[str, list[int]], list[dict[str, int]], list[dict[str, object]], list[int]]:
+    slot_count, corpus, corpus_indices = paper8_build_corpus(keyword_count, file_count, run_idx)
+    query_indices = corpus_indices[0][: min(PAPER1_QUERY_KEYWORDS, len(corpus_indices[0]))]
+    _, trapdoor = paper8_trapdoor(keyword_count, run_idx, [index % slot_count for index in query_indices])
+
+    start = time.perf_counter()
+    ranked: list[tuple[int, int]] = []
+    for doc_idx, doc in enumerate(corpus):
+        score = dot_score(doc["c0"], trapdoor["beta0"])
+        ranked.append((score, doc_idx))
+    candidate_limit = min(len(ranked), max(PAPER1_TOP_K, PAPER1_TOP_K * PAPER8_CANDIDATE_FACTOR))
+    candidate_rows = heapq.nlargest(candidate_limit, ranked, key=lambda item: item[0])
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    return elapsed_ms, trapdoor, [{"candidate_score": score, "doc_idx": doc_idx} for score, doc_idx in candidate_rows], corpus, query_indices
+
+
+def paper8_exact_match_from_candidates(
+    trapdoor: dict[str, list[int]],
+    candidates: list[dict[str, int]],
+    corpus: list[dict[str, object]],
+) -> tuple[float, list[dict[str, object]]]:
+    start = time.perf_counter()
+    ranked: list[tuple[int, int, list[int]]] = []
+    punctured_tag_set = {index for index, value in enumerate(trapdoor["permit"]) if value % 3 == 0}
+    for candidate in candidates:
+        doc_idx = int(candidate["doc_idx"])
+        doc = corpus[doc_idx]
+        if punctured_tag_set.intersection(set(doc["tags"])):
+            continue
+        merged = vec_add(vec_mul(doc["c0"], trapdoor["beta1"]), vec_mul(doc["c1"], trapdoor["beta2"]))
+        score = dot_score(merged, trapdoor["permit"])
+        ranked.append((score, doc_idx, merged))
+    top_results = heapq.nlargest(PAPER1_TOP_K, ranked, key=lambda item: item[0])
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    return elapsed_ms, [{"score": score, "doc_idx": doc_idx, "merged": merged} for score, doc_idx, merged in top_results]
+
+
+def paper8_puncture(active_user_count: int, run_idx: int) -> float:
+    rng = random.Random(seed_for(804, active_user_count, run_idx))
+    basis_pool = [
+        make_sparse_vector(PAPER8_MATRIX_DIM, PAPER8_MATRIX_DIM // 4, random.Random(rng.randint(0, 1_000_000_000) ^ user_idx), 1, 41)
+        for user_idx in range(active_user_count)
+    ]
+    update_tag = make_sparse_vector(PAPER8_MATRIX_DIM, PAPER8_TAG_WIDTH, rng, 1, 17)
+
+    start = time.perf_counter()
+    accumulator = update_tag
+    for round_idx in range(PAPER8_PUNCTURE_ROUNDS):
+        basis = basis_pool[round_idx % max(1, len(basis_pool))]
+        accumulator = vec_add(accumulator, vec_mul(basis, rotate(update_tag, (round_idx % 7) + 1)))
+        accumulator = vec_add(accumulator, scalar_mix(rotate(basis, (round_idx % 11) + 1), round_idx + 2))
+    _ = dot_score(accumulator, update_tag)
+    return (time.perf_counter() - start) * 1000.0
+
+
+def paper9_encrypt(keyword_count: int, run_idx: int) -> float:
+    slot_count = max(PAPER9_VECTOR_DIM, keyword_count + PAPER9_TEST_STRING_LEN)
+    rng = random.Random(seed_for(901, keyword_count, run_idx))
+    keyword_indices = [index % slot_count for index in paper8_explicit_indices(keyword_count)]
+    payload = vector_from_indices(slot_count, keyword_indices, rng, 1, 3)
+    fixed_bits = [1] * PAPER9_TEST_STRING_LEN
+    masks = [make_sparse_vector(slot_count, min(slot_count, keyword_count), random.Random(rng.randint(0, 1_000_000_000) ^ bit_idx), 1, 23)
+             for bit_idx in range(PAPER9_TEST_STRING_LEN)]
+
+    start = time.perf_counter()
+    accum = payload
+    for bit_idx, mask in enumerate(masks):
+        bit_scalar = 2 if fixed_bits[bit_idx] else 1
+        accum = vec_add(vec_mul(accum, rotate(mask, (bit_idx % 7) + 1)), scalar_mix(mask, bit_scalar))
+    _ = dot_score(accum, payload)
+    return (time.perf_counter() - start) * 1000.0
+
+
+def paper9_trapdoor(keyword_count: int, run_idx: int, query_indices: list[int] | None = None) -> tuple[float, dict[str, list[int]]]:
+    slot_count = max(PAPER9_VECTOR_DIM, keyword_count + PAPER9_TEST_STRING_LEN)
+    rng = random.Random(seed_for(902, keyword_count, run_idx))
+    if query_indices is None:
+        query_indices = [index % slot_count for index in paper8_explicit_indices(keyword_count)]
+    query = vector_from_indices(slot_count, query_indices, rng, 1, 3)
+    basis = make_sparse_vector(slot_count, min(slot_count, keyword_count), rng, 1, 29)
+    deltas = [make_sparse_vector(slot_count, max(8, min(slot_count, keyword_count // 4 + 1)), random.Random(rng.randint(0, 1_000_000_000) ^ idx), 0, 13)
+              for idx in range(PAPER9_TEST_STRING_LEN)]
+
+    start = time.perf_counter()
+    beta0 = vec_add(query, basis)
+    beta1 = vec_mul(beta0, rotate(basis, 3))
+    for idx, delta in enumerate(deltas):
+        beta1 = vec_add(beta1, rotate(delta, (idx % 5) + 1))
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    return elapsed_ms, {"beta0": beta0, "beta1": beta1}
+
+
+def paper9_build_corpus(keyword_count: int, file_count: int, run_idx: int) -> tuple[int, list[dict[str, object]], list[list[int]]]:
+    slot_count = max(PAPER9_VECTOR_DIM, keyword_count + PAPER9_TEST_STRING_LEN)
+    rng = random.Random(seed_for(903, keyword_count, run_idx))
+    corpus_indices = banded_keyword_indices(keyword_count, file_count, run_idx)
+    corpus: list[dict[str, object]] = []
+    for doc_idx in range(file_count):
+        doc_rng = random.Random(rng.randint(0, 1_000_000_000) ^ (doc_idx * 23 + 9))
+        keyword_indices = [index % slot_count for index in corpus_indices[doc_idx]]
+        payload = vector_from_indices(slot_count, keyword_indices, doc_rng, 1, 3)
+        masks = [make_sparse_vector(slot_count, min(slot_count, len(keyword_indices) + 1), random.Random(doc_rng.randint(0, 1_000_000_000) ^ idx), 1, 19)
+                 for idx in range(PAPER9_TEST_STRING_LEN)]
+        corpus.append({"payload": payload, "masks": masks})
+    return slot_count, corpus, corpus_indices
+
+
+def paper9_search_candidate_from_corpus(
+    keyword_count: int,
+    file_count: int,
+    run_idx: int,
+) -> tuple[float, dict[str, list[int]], list[dict[str, int]], list[dict[str, object]], list[int]]:
+    slot_count, corpus, corpus_indices = paper9_build_corpus(keyword_count, file_count, run_idx)
+    query_indices = corpus_indices[0][: min(PAPER1_QUERY_KEYWORDS, len(corpus_indices[0]))]
+    _, trapdoor = paper9_trapdoor(keyword_count, run_idx, [index % slot_count for index in query_indices])
+
+    start = time.perf_counter()
+    ranked: list[tuple[int, int]] = []
+    for doc_idx, doc in enumerate(corpus):
+        score = dot_score(doc["payload"], trapdoor["beta0"])
+        ranked.append((score, doc_idx))
+    candidate_limit = min(len(ranked), max(PAPER1_TOP_K, PAPER1_TOP_K * PAPER9_CANDIDATE_FACTOR))
+    candidate_rows = heapq.nlargest(candidate_limit, ranked, key=lambda item: item[0])
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    return elapsed_ms, trapdoor, [{"candidate_score": score, "doc_idx": doc_idx} for score, doc_idx in candidate_rows], corpus, query_indices
+
+
+def paper9_exact_match_from_candidates(
+    trapdoor: dict[str, list[int]],
+    candidates: list[dict[str, int]],
+    corpus: list[dict[str, object]],
+) -> tuple[float, list[dict[str, object]]]:
+    start = time.perf_counter()
+    ranked: list[tuple[int, int, list[int]]] = []
+    for candidate in candidates:
+        doc_idx = int(candidate["doc_idx"])
+        doc = corpus[doc_idx]
+        accum = doc["payload"]
+        recovered_bits = 0
+        for bit_idx, mask in enumerate(doc["masks"]):
+            probe = dot_score(vec_mul(accum, mask), trapdoor["beta1"])
+            if probe % 5 == 0:
+                break
+            recovered_bits += 1
+            accum = vec_add(accum, rotate(mask, (bit_idx % 7) + 1))
+        score = recovered_bits * 1000 + dot_score(accum, trapdoor["beta0"])
+        ranked.append((score, doc_idx, accum))
+    top_results = heapq.nlargest(PAPER1_TOP_K, ranked, key=lambda item: item[0])
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    return elapsed_ms, [{"score": score, "doc_idx": doc_idx, "merged": merged} for score, doc_idx, merged in top_results]
+
+
 def run_paper1_keyword_scaling(
     runs: int,
     keyword_counts: list[int],
@@ -593,13 +864,15 @@ def run_paper1_keyword_scaling(
     print_phase("Starting Reference Paper 1 benchmark")
     encryption_rows = []
     trapdoor_rows = []
-    search_rows = []
+    search_candidate_rows = []
+    search_exact_rows = []
     decrypt_rows = []
 
     for keyword_count in keyword_counts:
         encryption_values = []
         trapdoor_values = []
-        search_values = []
+        search_candidate_values = []
+        search_exact_values = []
         decrypt_values = []
         for run_idx in range(runs):
             print_progress("paper1", run_idx + 1, runs, f"keyword_count={keyword_count}")
@@ -607,26 +880,28 @@ def run_paper1_keyword_scaling(
             cached = load_or_generate_paper1_corpus(keyword_count, search_file_count, run_idx, cache_dir)
             trapdoor_ms, _ = paper1_trapdoor(keyword_count, run_idx, cached["query_indices"])
             trapdoor_values.append(trapdoor_ms)
-            search_ms, top_results = paper1_search_from_corpus(
+            candidate_ms, exact_ms, top_results = paper1_search(
                 keyword_count,
+                search_file_count,
                 run_idx,
-                int(cached["slots"]),
-                cached["corpus"],
-                cached["query_indices"],
+                cache_dir,
             )
-            search_values.append(search_ms)
+            search_candidate_values.append(candidate_ms)
+            search_exact_values.append(exact_ms)
             decrypt_values.append(
                 paper1_decrypt_from_corpus(keyword_count, run_idx, cached["query_indices"], top_results)
             )
 
         encryption_avg = average_ms(encryption_values)
         trapdoor_avg = average_ms(trapdoor_values)
-        search_avg = average_ms(search_values)
+        search_candidate_avg = average_ms(search_candidate_values)
+        search_exact_avg = average_ms(search_exact_values)
         decrypt_avg = average_ms(decrypt_values)
 
         print(f"paper1_encryption: keyword_count={keyword_count} runs={runs} avg_ms={encryption_avg:.3f}")
         print(f"paper1_trapdoor: keyword_count={keyword_count} runs={runs} avg_ms={trapdoor_avg:.3f}")
-        print(f"paper1_search: keyword_count={keyword_count} runs={runs} avg_ms={search_avg:.3f}")
+        print(f"paper1_search_candidate: keyword_count={keyword_count} runs={runs} avg_ms={search_candidate_avg:.3f}")
+        print(f"paper1_exact_match: keyword_count={keyword_count} runs={runs} avg_ms={search_exact_avg:.3f}")
         print(f"paper1_decryption: keyword_count={keyword_count} runs={runs} avg_ms={decrypt_avg:.3f}")
 
         encryption_rows.append(
@@ -635,13 +910,22 @@ def run_paper1_keyword_scaling(
         trapdoor_rows.append(
             {"experiment": "paper1_trapdoor", "keyword_count": keyword_count, "runs": runs, "avg_ms": f"{trapdoor_avg:.3f}"}
         )
-        search_rows.append(
+        search_candidate_rows.append(
             {
-                "experiment": "paper1_search",
+                "experiment": "paper1_search_candidate",
                 "keyword_count": keyword_count,
                 "file_count": search_file_count,
                 "runs": runs,
-                "avg_ms": f"{search_avg:.3f}",
+                "avg_ms": f"{search_candidate_avg:.3f}",
+            }
+        )
+        search_exact_rows.append(
+            {
+                "experiment": "paper1_exact_match",
+                "keyword_count": keyword_count,
+                "file_count": search_file_count,
+                "runs": runs,
+                "avg_ms": f"{search_exact_avg:.3f}",
             }
         )
         decrypt_rows.append(
@@ -656,7 +940,8 @@ def run_paper1_keyword_scaling(
 
     write_csv(output_dir / "paper1_encryption_results.csv", encryption_rows)
     write_csv(output_dir / "paper1_trapdoor_results.csv", trapdoor_rows)
-    write_csv(output_dir / "paper1_search_results.csv", search_rows)
+    write_csv(output_dir / "paper1_search_candidate_results.csv", search_candidate_rows)
+    write_csv(output_dir / "paper1_exact_match_results.csv", search_exact_rows)
     write_csv(output_dir / "paper1_decryption_results.csv", decrypt_rows)
 
 
@@ -668,39 +953,54 @@ def run_paper1_file_scaling(
     cache_dir: Path,
 ):
     print_phase("Starting Reference Paper 1 file-scaling benchmark")
-    search_rows = []
+    search_candidate_rows = []
+    search_exact_rows = []
     decrypt_rows = []
 
     for file_count in file_counts:
-        search_values = []
+        search_candidate_values = []
+        search_exact_values = []
         decrypt_values = []
         for run_idx in range(runs):
             print_progress("paper1_file_scaling", run_idx + 1, runs, f"keyword_count={keyword_count}, file_count={file_count}")
             cached = load_or_generate_paper1_corpus(keyword_count, file_count, run_idx, cache_dir)
-            search_ms, top_results = paper1_search_from_corpus(
+            candidate_ms, trapdoor, candidate_results = paper1_search_candidate_from_corpus(
                 keyword_count,
                 run_idx,
                 int(cached["slots"]),
                 cached["corpus"],
                 cached["query_indices"],
             )
-            search_values.append(search_ms)
+            exact_ms, top_results = paper1_exact_match_from_candidates(cached["corpus"], trapdoor, candidate_results)
+            search_candidate_values.append(candidate_ms)
+            search_exact_values.append(exact_ms)
             decrypt_values.append(
                 paper1_decrypt_from_corpus(keyword_count, run_idx, cached["query_indices"], top_results)
             )
 
-        search_avg = average_ms(search_values)
+        search_candidate_avg = average_ms(search_candidate_values)
+        search_exact_avg = average_ms(search_exact_values)
         decrypt_avg = average_ms(decrypt_values)
-        print(f"paper1_file_scaling_search: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={search_avg:.3f}")
+        print(f"paper1_file_scaling_search_candidate: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={search_candidate_avg:.3f}")
+        print(f"paper1_file_scaling_exact_match: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={search_exact_avg:.3f}")
         print(f"paper1_file_scaling_decryption: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={decrypt_avg:.3f}")
 
-        search_rows.append(
+        search_candidate_rows.append(
             {
-                "experiment": "paper1_file_scaling_search",
+                "experiment": "paper1_file_scaling_search_candidate",
                 "keyword_count": keyword_count,
                 "file_count": file_count,
                 "runs": runs,
-                "avg_ms": f"{search_avg:.3f}",
+                "avg_ms": f"{search_candidate_avg:.3f}",
+            }
+        )
+        search_exact_rows.append(
+            {
+                "experiment": "paper1_file_scaling_exact_match",
+                "keyword_count": keyword_count,
+                "file_count": file_count,
+                "runs": runs,
+                "avg_ms": f"{search_exact_avg:.3f}",
             }
         )
         decrypt_rows.append(
@@ -713,7 +1013,8 @@ def run_paper1_file_scaling(
             }
         )
 
-    write_csv(output_dir / "paper1_file_scaling_search_results.csv", search_rows)
+    write_csv(output_dir / "paper1_file_scaling_search_candidate_results.csv", search_candidate_rows)
+    write_csv(output_dir / "paper1_file_scaling_exact_match_results.csv", search_exact_rows)
     write_csv(output_dir / "paper1_file_scaling_decryption_results.csv", decrypt_rows)
 
 
@@ -799,6 +1100,239 @@ def run_paper6(runs: int, search_file_count: int, output_dir: Path):
     write_csv(output_dir / "paper6_decryption_results.csv", decrypt_rows)
 
 
+def run_paper8(runs: int, search_file_count: int, output_dir: Path):
+    print_phase("Starting Reference Paper 8 benchmark")
+    encryption_rows = []
+    trapdoor_rows = []
+    search_candidate_rows = []
+    exact_match_rows = []
+    revocation_rows = []
+
+    for keyword_count in KEYWORD_COUNTS:
+        encryption_values = []
+        trapdoor_values = []
+        search_candidate_values = []
+        exact_match_values = []
+        for run_idx in range(runs):
+            print_progress("paper8_encryption", run_idx + 1, runs, f"keyword_count={keyword_count}")
+            encryption_values.append(paper8_encrypt(keyword_count, run_idx))
+            print_progress("paper8_trapdoor", run_idx + 1, runs, f"keyword_count={keyword_count}")
+            trapdoor_ms, _ = paper8_trapdoor(keyword_count, run_idx)
+            trapdoor_values.append(trapdoor_ms)
+            print_progress("paper8_search", run_idx + 1, runs, f"keyword_count={keyword_count}")
+            candidate_ms, trapdoor, candidates, corpus, _query_indices = paper8_search_candidate_from_corpus(
+                keyword_count,
+                search_file_count,
+                run_idx,
+            )
+            exact_ms, _results = paper8_exact_match_from_candidates(trapdoor, candidates, corpus)
+            search_candidate_values.append(candidate_ms)
+            exact_match_values.append(exact_ms)
+
+        encryption_avg = average_ms(encryption_values)
+        trapdoor_avg = average_ms(trapdoor_values)
+        search_candidate_avg = average_ms(search_candidate_values)
+        exact_match_avg = average_ms(exact_match_values)
+        print(f"paper8_encryption: keyword_count={keyword_count} runs={runs} avg_ms={encryption_avg:.3f}")
+        print(f"paper8_trapdoor: keyword_count={keyword_count} runs={runs} avg_ms={trapdoor_avg:.3f}")
+        print(f"paper8_search_candidate: keyword_count={keyword_count} runs={runs} avg_ms={search_candidate_avg:.3f}")
+        print(f"paper8_exact_match: keyword_count={keyword_count} runs={runs} avg_ms={exact_match_avg:.3f}")
+
+        encryption_rows.append({"experiment": "paper8_encryption", "keyword_count": keyword_count, "runs": runs, "avg_ms": f"{encryption_avg:.3f}"})
+        trapdoor_rows.append({"experiment": "paper8_trapdoor", "keyword_count": keyword_count, "runs": runs, "avg_ms": f"{trapdoor_avg:.3f}"})
+        search_candidate_rows.append(
+            {
+                "experiment": "paper8_search_candidate",
+                "keyword_count": keyword_count,
+                "file_count": search_file_count,
+                "runs": runs,
+                "avg_ms": f"{search_candidate_avg:.3f}",
+            }
+        )
+        exact_match_rows.append(
+            {
+                "experiment": "paper8_exact_match",
+                "keyword_count": keyword_count,
+                "file_count": search_file_count,
+                "runs": runs,
+                "avg_ms": f"{exact_match_avg:.3f}",
+            }
+        )
+
+    for user_count in REVOCATION_USER_COUNTS:
+        values = []
+        for run_idx in range(runs):
+            print_progress("paper8_revocation", run_idx + 1, runs, f"active_user_count={user_count}")
+            values.append(paper8_puncture(user_count, run_idx))
+        avg = average_ms(values)
+        print(f"paper8_revocation: active_user_count={user_count} runs={runs} avg_ms={avg:.3f}")
+        revocation_rows.append(
+            {"experiment": "paper8_revocation", "active_user_count": user_count, "runs": runs, "avg_ms": f"{avg:.3f}"}
+        )
+
+    write_csv(output_dir / "paper8_encryption_results.csv", encryption_rows)
+    write_csv(output_dir / "paper8_trapdoor_results.csv", trapdoor_rows)
+    write_csv(output_dir / "paper8_search_candidate_results.csv", search_candidate_rows)
+    write_csv(output_dir / "paper8_exact_match_results.csv", exact_match_rows)
+    write_csv(output_dir / "paper8_revocation_results.csv", revocation_rows)
+
+
+def run_paper8_file_scaling(runs: int, file_counts: list[int], keyword_count: int, output_dir: Path):
+    print_phase("Starting Reference Paper 8 file-scaling benchmark")
+    search_candidate_rows = []
+    exact_match_rows = []
+
+    for file_count in file_counts:
+        search_candidate_values = []
+        exact_match_values = []
+        for run_idx in range(runs):
+            print_progress("paper8_file_scaling", run_idx + 1, runs, f"keyword_count={keyword_count}, file_count={file_count}")
+            candidate_ms, trapdoor, candidates, corpus, _query_indices = paper8_search_candidate_from_corpus(
+                keyword_count,
+                file_count,
+                run_idx,
+            )
+            exact_ms, _results = paper8_exact_match_from_candidates(trapdoor, candidates, corpus)
+            search_candidate_values.append(candidate_ms)
+            exact_match_values.append(exact_ms)
+
+        search_candidate_avg = average_ms(search_candidate_values)
+        exact_match_avg = average_ms(exact_match_values)
+        print(f"paper8_file_scaling_search_candidate: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={search_candidate_avg:.3f}")
+        print(f"paper8_file_scaling_exact_match: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={exact_match_avg:.3f}")
+        search_candidate_rows.append(
+            {
+                "experiment": "paper8_file_scaling_search_candidate",
+                "keyword_count": keyword_count,
+                "file_count": file_count,
+                "runs": runs,
+                "avg_ms": f"{search_candidate_avg:.3f}",
+            }
+        )
+        exact_match_rows.append(
+            {
+                "experiment": "paper8_file_scaling_exact_match",
+                "keyword_count": keyword_count,
+                "file_count": file_count,
+                "runs": runs,
+                "avg_ms": f"{exact_match_avg:.3f}",
+            }
+        )
+
+    write_csv(output_dir / "paper8_file_scaling_search_candidate_results.csv", search_candidate_rows)
+    write_csv(output_dir / "paper8_file_scaling_exact_match_results.csv", exact_match_rows)
+
+
+def run_paper9(runs: int, search_file_count: int, output_dir: Path):
+    print_phase("Starting Reference Paper 9 benchmark")
+    encryption_rows = []
+    trapdoor_rows = []
+    search_candidate_rows = []
+    exact_match_rows = []
+
+    for keyword_count in KEYWORD_COUNTS:
+        encryption_values = []
+        trapdoor_values = []
+        search_candidate_values = []
+        exact_match_values = []
+        for run_idx in range(runs):
+            print_progress("paper9_encryption", run_idx + 1, runs, f"keyword_count={keyword_count}")
+            encryption_values.append(paper9_encrypt(keyword_count, run_idx))
+            print_progress("paper9_trapdoor", run_idx + 1, runs, f"keyword_count={keyword_count}")
+            trapdoor_ms, _ = paper9_trapdoor(keyword_count, run_idx)
+            trapdoor_values.append(trapdoor_ms)
+            print_progress("paper9_search", run_idx + 1, runs, f"keyword_count={keyword_count}")
+            candidate_ms, trapdoor, candidates, corpus, _query_indices = paper9_search_candidate_from_corpus(
+                keyword_count,
+                search_file_count,
+                run_idx,
+            )
+            exact_ms, _results = paper9_exact_match_from_candidates(trapdoor, candidates, corpus)
+            search_candidate_values.append(candidate_ms)
+            exact_match_values.append(exact_ms)
+
+        encryption_avg = average_ms(encryption_values)
+        trapdoor_avg = average_ms(trapdoor_values)
+        search_candidate_avg = average_ms(search_candidate_values)
+        exact_match_avg = average_ms(exact_match_values)
+        print(f"paper9_encryption: keyword_count={keyword_count} runs={runs} avg_ms={encryption_avg:.3f}")
+        print(f"paper9_trapdoor: keyword_count={keyword_count} runs={runs} avg_ms={trapdoor_avg:.3f}")
+        print(f"paper9_search_candidate: keyword_count={keyword_count} runs={runs} avg_ms={search_candidate_avg:.3f}")
+        print(f"paper9_exact_match: keyword_count={keyword_count} runs={runs} avg_ms={exact_match_avg:.3f}")
+
+        encryption_rows.append({"experiment": "paper9_encryption", "keyword_count": keyword_count, "runs": runs, "avg_ms": f"{encryption_avg:.3f}"})
+        trapdoor_rows.append({"experiment": "paper9_trapdoor", "keyword_count": keyword_count, "runs": runs, "avg_ms": f"{trapdoor_avg:.3f}"})
+        search_candidate_rows.append(
+            {
+                "experiment": "paper9_search_candidate",
+                "keyword_count": keyword_count,
+                "file_count": search_file_count,
+                "runs": runs,
+                "avg_ms": f"{search_candidate_avg:.3f}",
+            }
+        )
+        exact_match_rows.append(
+            {
+                "experiment": "paper9_exact_match",
+                "keyword_count": keyword_count,
+                "file_count": search_file_count,
+                "runs": runs,
+                "avg_ms": f"{exact_match_avg:.3f}",
+            }
+        )
+
+    write_csv(output_dir / "paper9_encryption_results.csv", encryption_rows)
+    write_csv(output_dir / "paper9_trapdoor_results.csv", trapdoor_rows)
+    write_csv(output_dir / "paper9_search_candidate_results.csv", search_candidate_rows)
+    write_csv(output_dir / "paper9_exact_match_results.csv", exact_match_rows)
+
+
+def run_paper9_file_scaling(runs: int, file_counts: list[int], keyword_count: int, output_dir: Path):
+    print_phase("Starting Reference Paper 9 file-scaling benchmark")
+    search_candidate_rows = []
+    exact_match_rows = []
+
+    for file_count in file_counts:
+        search_candidate_values = []
+        exact_match_values = []
+        for run_idx in range(runs):
+            print_progress("paper9_file_scaling", run_idx + 1, runs, f"keyword_count={keyword_count}, file_count={file_count}")
+            candidate_ms, trapdoor, candidates, corpus, _query_indices = paper9_search_candidate_from_corpus(
+                keyword_count,
+                file_count,
+                run_idx,
+            )
+            exact_ms, _results = paper9_exact_match_from_candidates(trapdoor, candidates, corpus)
+            search_candidate_values.append(candidate_ms)
+            exact_match_values.append(exact_ms)
+
+        search_candidate_avg = average_ms(search_candidate_values)
+        exact_match_avg = average_ms(exact_match_values)
+        print(f"paper9_file_scaling_search_candidate: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={search_candidate_avg:.3f}")
+        print(f"paper9_file_scaling_exact_match: keyword_count={keyword_count} file_count={file_count} runs={runs} avg_ms={exact_match_avg:.3f}")
+        search_candidate_rows.append(
+            {
+                "experiment": "paper9_file_scaling_search_candidate",
+                "keyword_count": keyword_count,
+                "file_count": file_count,
+                "runs": runs,
+                "avg_ms": f"{search_candidate_avg:.3f}",
+            }
+        )
+        exact_match_rows.append(
+            {
+                "experiment": "paper9_file_scaling_exact_match",
+                "keyword_count": keyword_count,
+                "file_count": file_count,
+                "runs": runs,
+                "avg_ms": f"{exact_match_avg:.3f}",
+            }
+        )
+
+    write_csv(output_dir / "paper9_file_scaling_search_candidate_results.csv", search_candidate_rows)
+    write_csv(output_dir / "paper9_file_scaling_exact_match_results.csv", exact_match_rows)
+
+
 def main():
     args = build_parser().parse_args()
     output_dir = args.output_dir
@@ -826,8 +1360,14 @@ def main():
         run_paper4(args.runs, output_dir)
     if args.paper in {"all", "paper5"}:
         run_paper5(args.runs, output_dir)
-    if args.paper == "paper6":
+    if args.paper in {"all", "paper6"}:
         run_paper6(args.runs, args.search_file_count, output_dir)
+    if args.paper in {"all", "paper8"}:
+        run_paper8(args.runs, args.search_file_count, output_dir)
+        run_paper8_file_scaling(args.runs, paper1_file_counts, paper1_keyword_counts[-1], output_dir)
+    if args.paper in {"all", "paper9"}:
+        run_paper9(args.runs, args.search_file_count, output_dir)
+        run_paper9_file_scaling(args.runs, paper1_file_counts, paper1_keyword_counts[-1], output_dir)
 
     print(f"Reference paper benchmark outputs written under {output_dir}")
 

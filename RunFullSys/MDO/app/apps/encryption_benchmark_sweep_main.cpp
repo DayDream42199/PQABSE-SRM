@@ -49,6 +49,7 @@ struct AggregateBucket {
     std::vector<double> metric_a;
     std::vector<double> metric_b;
     std::vector<double> metric_c;
+    std::vector<double> metric_d;
     std::vector<double> bytes;
 };
 
@@ -71,14 +72,14 @@ int main(int argc, char** argv) {
 
     const std::vector<std::string> metrics_header = {
         "phase", "kind", "name", "gid", "bundle_label", "epoch", "user_attr_count", "policy_attr_count",
-        "keyword_count", "keygen_ms", "encrypt_bundle_ms", "bundle_write_ms", "artifact_bytes"
+        "keyword_count", "keygen_ms", "encrypt_bundle_ms", "mobile_encrypt_ms", "bundle_write_ms", "artifact_bytes"
     };
     const std::vector<std::string> user_aggregate_header = {
         "phase", "group_by", "attribute_count", "runs", "avg_keygen_ms", "avg_user_key_bytes"
     };
     const std::vector<std::string> bundle_aggregate_header = {
         "phase", "group_by", "policy_attribute_count", "runs", "avg_keyword_count", "avg_encrypt_bundle_ms",
-        "avg_bundle_write_ms", "avg_bundle_bytes"
+        "avg_mobile_encrypt_ms", "avg_bundle_write_ms", "avg_bundle_bytes"
     };
 
     SystemParams params{};
@@ -169,6 +170,7 @@ int main(int argc, char** argv) {
 
         CiphertextBundle bundle;
         const auto encrypt_start = Clock::now();
+        double mobile_encrypt_ms = 0.0;
         tee.CreateCiphertextBundle(params,
                                    pk,
                                    bundle_input.label,
@@ -176,7 +178,8 @@ int main(int argc, char** argv) {
                                    bundle_input.keywords,
                                    bundle_input.policy,
                                    "epoch-" + std::to_string(Blockchain.current_state.epoch),
-                                   bundle);
+                                   bundle,
+                                   &mobile_encrypt_ms);
         const double encrypt_bundle_ms = ElapsedMilliseconds(encrypt_start, Clock::now());
 
         const auto bundle_path = BundleBinaryPath(bundle_input.label);
@@ -211,6 +214,7 @@ int main(int argc, char** argv) {
                                 ToCsvField(static_cast<uintmax_t>(bundle_input.keywords.size())),
                                 ToCsvField(""),
                                 ToCsvField(encrypt_bundle_ms),
+                                ToCsvField(mobile_encrypt_ms),
                                 ToCsvField(bundle_write_ms),
                                 ToCsvField(FileSizeOrZero(bundle_path))
                             });
@@ -220,7 +224,8 @@ int main(int argc, char** argv) {
         ++bucket.runs;
         bucket.metric_a.push_back(static_cast<double>(bundle_input.keywords.size()));
         bucket.metric_b.push_back(encrypt_bundle_ms);
-        bucket.metric_c.push_back(bundle_write_ms);
+        bucket.metric_c.push_back(mobile_encrypt_ms);
+        bucket.metric_d.push_back(bundle_write_ms);
         bucket.bytes.push_back(static_cast<double>(FileSizeOrZero(bundle_path)));
     }
 
@@ -278,6 +283,7 @@ int main(int argc, char** argv) {
                                 ToCsvField(AverageOrZero(bucket.metric_a)),
                                 ToCsvField(AverageOrZero(bucket.metric_b)),
                                 ToCsvField(AverageOrZero(bucket.metric_c)),
+                                ToCsvField(AverageOrZero(bucket.metric_d)),
                                 ToCsvField(AverageOrZero(bucket.bytes))
                             });
     }
