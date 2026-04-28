@@ -99,6 +99,56 @@ run_encrypt_raw() {
   "${args[@]}"
 }
 
+run_encrypt_raw_file() {
+  require_build
+  local owner_gid="${1:?usage: edge_node.sh encrypt-raw-file <owner-gid> <label> <plaintext-file> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local label="${2:?usage: edge_node.sh encrypt-raw-file <owner-gid> <label> <plaintext-file> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local plaintext_file="${3:?usage: edge_node.sh encrypt-raw-file <owner-gid> <label> <plaintext-file> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local policy_type="${4:?usage: edge_node.sh encrypt-raw-file <owner-gid> <label> <plaintext-file> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local threshold="${5:?usage: edge_node.sh encrypt-raw-file <owner-gid> <label> <plaintext-file> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local keyword_csv="${6:?usage: edge_node.sh encrypt-raw-file <owner-gid> <label> <plaintext-file> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]}"
+  local policy_attr_csv="${7-}"
+  local policy_expression="${8:-}"
+  local extra_args=("${@:9}")
+
+  if [[ -z "$policy_expression" && -z "$policy_attr_csv" ]]; then
+    echo "usage: edge_node.sh encrypt-raw-file <owner-gid> <label> <plaintext-file> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]" >&2
+    return 1
+  fi
+
+  local args=(
+    "$BUILD_DIR/phase3_encrypt"
+    --owner-gid "$owner_gid"
+    --label "$label"
+    --plaintext-file "$plaintext_file"
+    --policy-type "$policy_type"
+    --threshold "$threshold"
+  )
+
+  local item
+  IFS=',' read -r -a keyword_array <<< "$keyword_csv"
+  for item in "${keyword_array[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ -n "$item" ]] && args+=(--keyword "$item")
+  done
+
+  IFS=',' read -r -a policy_attr_array <<< "$policy_attr_csv"
+  for item in "${policy_attr_array[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ -n "$item" ]] && args+=(--policy-attr "$item")
+  done
+
+  if [[ -n "$policy_expression" ]]; then
+    args+=(--policy-expression "$policy_expression")
+  fi
+
+  args+=("${extra_args[@]}")
+  args+=("${tee_args[@]}")
+  "${args[@]}"
+}
+
 serve_http() {
   exec python3 "$ROLE_DIR/http_server.py" \
     --host "${2:-$HTTP_HOST}" \
@@ -111,9 +161,10 @@ case "$cmd" in
   sync-state) sync_state_from_ta ;;
   encrypt) run_encrypt "${2:-}" ;;
   encrypt-raw) shift; run_encrypt_raw "$@" ;;
+  encrypt-raw-file) shift; run_encrypt_raw_file "$@" ;;
   serve-http) serve_http "$@" ;;
   *)
-    echo "Usage: $0 {sync-state|encrypt <bundle>|encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]|serve-http [host] [port]}" >&2
+    echo "Usage: $0 {sync-state|encrypt <bundle>|encrypt-raw <owner-gid> <label> <plaintext> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]|encrypt-raw-file <owner-gid> <label> <plaintext-file> <policy-type> <threshold> <keyword-csv> <policy-attr-csv> [policy-expression]|serve-http [host] [port]}" >&2
     exit 1
     ;;
 esac

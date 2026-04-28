@@ -163,11 +163,13 @@ class EdgeHandler(BaseHTTPRequestHandler):
 
             with tempfile.TemporaryDirectory(prefix="pqabse-mobile-encrypt-") as temp_dir_name:
                 metrics_path = Path(temp_dir_name) / "edge_metrics.csv"
+                plaintext_path = Path(temp_dir_name) / "plaintext.txt"
+                plaintext_path.write_text(plaintext, encoding="utf-8")
                 args = [
-                    "encrypt-raw",
+                    "encrypt-raw-file",
                     owner_gid,
                     label,
-                    plaintext,
+                    str(plaintext_path),
                     policy_type,
                     str(threshold),
                     ",".join(item.strip() for item in keywords),

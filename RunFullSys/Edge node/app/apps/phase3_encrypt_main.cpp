@@ -1,4 +1,7 @@
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <stdexcept>
 
 #include "entities/NitroTeeClient.h"
 #include "entities/SoftwareTee.h"
@@ -22,6 +25,14 @@ abse_zkp::NitroTeeOptions LoadNitroOptions(const abse_zkp::CliArgs& cli) {
     options.port = static_cast<std::uint32_t>(std::stoul(cli.Get("--nitro-port", "5005")));
     options.timeout_ms = std::stoi(cli.Get("--nitro-timeout-ms", "30000"));
     return options;
+}
+
+std::string ReadPlaintextFile(const std::string& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        throw std::runtime_error("Failed to open plaintext file: " + path);
+    }
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
 }  // namespace
@@ -61,7 +72,12 @@ int main(int argc, char** argv) {
             data_owner_gid = cli.Require("--owner-gid");
         }
         label = cli.Require("--label");
-        plaintext = cli.Require("--plaintext");
+        const std::string plaintext_file = cli.Get("--plaintext-file");
+        if (!plaintext_file.empty()) {
+            plaintext = ReadPlaintextFile(plaintext_file);
+        } else {
+            plaintext = cli.Require("--plaintext");
+        }
         keywords = cli.GetAll("--keyword");
         if (keywords.empty()) keywords = {"default"};
         const std::string policy_expression = cli.Get("--policy-expression");
