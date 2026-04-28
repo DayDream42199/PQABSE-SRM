@@ -161,7 +161,8 @@ int main(int argc, char** argv) {
     std::string preferred_label_token;
     ReadTextFile(request_dir / "preferred_label_token.txt", preferred_label_token);
 
-    if (!rekey_state.update_token_seed.empty()) {
+    if (!rekey_state.update_token_seed.empty() &&
+        rekey_state.epoch == Blockchain.current_state.epoch) {
         TrustedAuthority ta;
         std::string expected_token;
         if (!ta.generate_update_token_for_user(user_record, Blockchain.current_state.epoch, rekey_state.update_token_seed, expected_token)) {

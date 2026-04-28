@@ -94,13 +94,21 @@ bool SearchGateway::VerifyAuthToken(const AuthToken& token) {
     Blockchain.sync_from_chain();
     OQS_SIG* verifier = OQS_SIG_new(ia_signature_algorithm.c_str());
     if (verifier == nullptr) return false;
+    std::string attribute_csv;
+    for (std::size_t index = 0; index < token.attributes.size(); ++index) {
+        if (index > 0) {
+            attribute_csv += ",";
+        }
+        attribute_csv += token.attributes[index];
+    }
     const std::string payload = token.user_gid + "|" + token.zk_id + "|" +
                                 std::to_string(token.leaf_index) + "|" +
                                 std::to_string(token.issued_tag.epoch) + "|" +
                                 token.issued_tag.revocation_root + "|" +
                                 token.registration_root + "|" +
                                 std::to_string(token.nonce) + "|" +
-                                std::to_string(token.issued_at_unix);
+                                std::to_string(token.issued_at_unix) + "|" +
+                                attribute_csv;
     const OQS_STATUS signature_ok = OQS_SIG_verify(verifier,
         reinterpret_cast<const uint8_t*>(payload.data()), payload.size(),
         token.signature.data(), token.signature.size(), ia_public_key.data());
@@ -134,7 +142,8 @@ bool SearchGateway::authorize_epoch_access(const UserRecord& user_record,
     if (user_record.user_gid.empty() || user_record.is_revoked) {
         return false;
     }
-    if (Blockchain.current_state.epoch == 0 || rekey_state.update_token_seed.empty()) {
+    if (Blockchain.current_state.epoch == 0 || rekey_state.update_token_seed.empty() ||
+        rekey_state.epoch != Blockchain.current_state.epoch) {
         return true;
     }
     TrustedAuthority ta;
