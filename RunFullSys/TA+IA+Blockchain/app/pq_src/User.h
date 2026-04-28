@@ -21,5 +21,6 @@ public:
     bool register_with_authority(IdentityAuthority& authority);
     bool request_authentication(IdentityAuthority& authority);
     bool request_zkp_authentication(IdentityAuthority& authority);
+    bool request_zkp_authentication(IdentityAuthority& authority, const std::vector<std::string>& attributes);
     bool request_registration_auth_path(const IdentityAuthority& authority, std::vector<MerkleProofNode>& auth_path) const;
 };

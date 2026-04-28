@@ -19,47 +19,45 @@ rewrite_bundle_metadata() {
   local meta_path="${1:?}"
   local label
   label="$(basename "$meta_path" _bundle.meta)"
-  python3 - "$meta_path" "$APP_DIR/runtime/ciphertexts/${label}_bundle.bin" <<'PY'
+  python3 - "$meta_path" "$label" <<'PY'
 from pathlib import Path
 import sys
 
 meta_path = Path(sys.argv[1])
-bundle_path = sys.argv[2]
+bundle_label = sys.argv[2]
 lines = meta_path.read_text().splitlines()
 updated = []
-replaced = False
+seen = set()
 for line in lines:
-    if line.startswith("bundle_path="):
-        updated.append(f"bundle_path={bundle_path}")
-        replaced = True
+    if line.startswith("bundle_label="):
+        updated.append(f"bundle_label={bundle_label}")
+        seen.add("bundle_label")
+    elif line.startswith("bundle_path=") or line.startswith("data_owner_gid="):
+        continue
     else:
         updated.append(line)
-if not replaced:
-    updated.append(f"bundle_path={bundle_path}")
+        if "=" in line:
+            seen.add(line.split("=", 1)[0])
+if "bundle_label" not in seen:
+    updated.append(f"bundle_label={bundle_label}")
 meta_path.write_text("\n".join(updated) + "\n")
 PY
 }
 
 sync_state_from_ta() {
   local archive
-  local user_archive
   local sync_dir
   archive="$(mktemp)"
-  user_archive="$(mktemp)"
   sync_dir="$(mktemp -d)"
   curl -fsS "$TA_URL/state/latest.tar.gz" -o "$archive"
-  curl -fsS "$TA_URL/users/all.tar.gz" -o "$user_archive"
   tar -xzf "$archive" -C "$sync_dir"
-  tar -xzf "$user_archive" -C "$sync_dir"
   mkdir -p "$APP_DIR/runtime"
-  rm -rf "$APP_DIR/runtime/abse" "$APP_DIR/runtime/state" "$APP_DIR/runtime/cloud" "$APP_DIR/runtime/users"
+  rm -rf "$APP_DIR/runtime/abse" "$APP_DIR/runtime/state" "$APP_DIR/runtime/cloud"
   [[ -d "$sync_dir/abse" ]] && cp -a "$sync_dir/abse" "$APP_DIR/runtime/"
   [[ -d "$sync_dir/state" ]] && cp -a "$sync_dir/state" "$APP_DIR/runtime/"
   [[ -d "$sync_dir/cloud" ]] && cp -a "$sync_dir/cloud" "$APP_DIR/runtime/"
-  [[ -d "$sync_dir/users" ]] && cp -a "$sync_dir/users" "$APP_DIR/runtime/"
   rm -rf "$sync_dir"
   rm -f "$archive"
-  rm -f "$user_archive"
 }
 
 import_upload_dir() {

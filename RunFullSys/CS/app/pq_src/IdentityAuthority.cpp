@@ -169,6 +169,17 @@ std::string bytes_to_hex(const std::vector<uint8_t>& bytes) {
     return out.str();
 }
 
+std::string join_strings(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << values[index];
+    }
+    return out.str();
+}
+
 std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
     std::vector<uint8_t> bytes;
     if (hex.size() % 2 != 0) {
@@ -374,10 +385,11 @@ std::string IdentityAuthority::build_auth_payload(const UserRecord& user,
                                                   const VersionTag& tag,
                                                   const std::string& registration_root,
                                                   int nonce,
-                                                  std::int64_t issued_at_unix) const {
+                                                  std::int64_t issued_at_unix,
+                                                  const std::vector<std::string>& attributes) const {
     return user.user_gid + "|" + user.zk_id + "|" + std::to_string(user.leaf_index) + "|" +
            std::to_string(tag.epoch) + "|" + tag.revocation_root + "|" + registration_root + "|" +
-           std::to_string(nonce) + "|" + std::to_string(issued_at_unix);
+           std::to_string(nonce) + "|" + std::to_string(issued_at_unix) + "|" + join_strings(attributes);
 }
 
 void IdentityAuthority::rebuild_trees_from_users() {
@@ -539,6 +551,10 @@ UserRecord IdentityAuthority::register_user(std::string user_gid, int identity_s
 }
 
 bool IdentityAuthority::authenticate_user(const std::string& user_gid, AuthToken& token) {
+    return authenticate_user(user_gid, {}, token);
+}
+
+bool IdentityAuthority::authenticate_user(const std::string& user_gid, const std::vector<std::string>& attributes, AuthToken& token) {
     auto it = users.find(user_gid);
     if (it == users.end() || it->second.is_revoked) {
         return false;
@@ -548,6 +564,8 @@ bool IdentityAuthority::authenticate_user(const std::string& user_gid, AuthToken
     UserRecord& user = it->second;
     token.user_gid = user.user_gid;
     token.zk_id = user.zk_id;
+    token.attributes = attributes;
+    token.update_token.clear();
     token.nonce = generate_nonce_mod_q();
     token.issued_at_unix = current_unix_timestamp();
     token.leaf_index = user.leaf_index;
@@ -572,7 +590,8 @@ bool IdentityAuthority::authenticate_user(const std::string& user_gid, AuthToken
                                                    token.issued_tag,
                                                    token.registration_root,
                                                    token.nonce,
-                                                   token.issued_at_unix);
+                                                   token.issued_at_unix,
+                                                   token.attributes);
     OQS_SIG* sig = static_cast<OQS_SIG*>(signer_handle);
     token.signature.resize(sig->length_signature);
     size_t signature_len = 0;
@@ -671,5 +690,6 @@ std::string IdentityAuthority::serialize_auth_payload(const AuthToken& token) co
                               token.issued_tag,
                               token.registration_root,
                               token.nonce,
-                              token.issued_at_unix);
+                              token.issued_at_unix,
+                              token.attributes);
 }

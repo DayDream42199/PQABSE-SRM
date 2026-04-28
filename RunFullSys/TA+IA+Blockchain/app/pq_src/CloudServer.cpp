@@ -155,13 +155,21 @@ bool CloudServer::verify_auth_token(const AuthToken& token) {
         return false;
     }
 
+    std::string attribute_csv;
+    for (std::size_t index = 0; index < token.attributes.size(); ++index) {
+        if (index > 0) {
+            attribute_csv += ",";
+        }
+        attribute_csv += token.attributes[index];
+    }
     const std::string payload = token.user_gid + "|" + token.zk_id + "|" +
                                 std::to_string(token.leaf_index) + "|" +
                                 std::to_string(token.issued_tag.epoch) + "|" +
                                 token.issued_tag.revocation_root + "|" +
                                 token.registration_root + "|" +
                                 std::to_string(token.nonce) + "|" +
-                                std::to_string(token.issued_at_unix);
+                                std::to_string(token.issued_at_unix) + "|" +
+                                attribute_csv;
 
     const OQS_STATUS signature_ok = OQS_SIG_verify(
         verifier,

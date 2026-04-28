@@ -20,6 +20,7 @@ struct UserCredentialRecord {
 
 struct StoredBundleRecord {
     std::string bundle_label;
+    std::string bundle_label_token;
     std::string bundle_path;
     std::string data_owner_gid;
     VersionTag version_tag;

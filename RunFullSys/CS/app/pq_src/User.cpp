@@ -192,7 +192,11 @@ bool User::request_authentication(IdentityAuthority& authority) {
 }
 
 bool User::request_zkp_authentication(IdentityAuthority& authority) {
-    if (!authority.authenticate_user(gid, auth_token)) {
+    return request_zkp_authentication(authority, {});
+}
+
+bool User::request_zkp_authentication(IdentityAuthority& authority, const std::vector<std::string>& attributes) {
+    if (!authority.authenticate_user(gid, attributes, auth_token)) {
         return false;
     }
     if (!has_identity_secret) {

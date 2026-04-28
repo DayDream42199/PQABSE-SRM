@@ -2,9 +2,11 @@
 import argparse
 import base64
 import csv
+import hashlib
 import io
 import json
 import os
+import secrets
 import subprocess
 import tarfile
 import tempfile
@@ -28,6 +30,10 @@ def load_key_values(path: Path):
 def write_key_values(path: Path, values):
     lines = [f"{key}={value}" for key, value in values.items()]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def label_token(label: str) -> str:
+    return hashlib.sha256(label.encode("utf-8")).hexdigest()
 
 
 def tar_directory(directory: Path) -> bytes:
@@ -113,7 +119,8 @@ class CsHandler(BaseHTTPRequestHandler):
             return []
         labels = []
         for meta_path in sorted(ciphertext_dir.glob("*_bundle.meta")):
-            labels.append(meta_path.name[:-len("_bundle.meta")])
+            values = load_key_values(meta_path)
+            labels.append(values.get("bundle_label", meta_path.name[:-len("_bundle.meta")]))
         return labels
 
     def _load_mobile_response(self, response_dir: Path):
@@ -294,8 +301,26 @@ class CsHandler(BaseHTTPRequestHandler):
 
             with tempfile.TemporaryDirectory(prefix="pqabse-mobile-import-") as temp_dir_name:
                 temp_dir = Path(temp_dir_name)
-                (temp_dir / f"{label}_bundle.bin").write_bytes(bundle_bin_bytes)
-                (temp_dir / f"{label}_bundle.meta").write_bytes(bundle_meta_bytes)
+                bundle_id = secrets.token_hex(16)
+                try:
+                    decoded_meta = bundle_meta_bytes.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid bundle metadata encoding: {exc}"})
+                    return
+                placeholder_meta = temp_dir / "placeholder.meta"
+                placeholder_meta.write_text(decoded_meta, encoding="utf-8")
+                meta_values = load_key_values(placeholder_meta)
+                placeholder_meta.unlink(missing_ok=True)
+                sanitized_values = {
+                    "bundle_label": bundle_id,
+                    "bundle_label_token": label_token(label),
+                    "epoch": meta_values.get("epoch", "0"),
+                    "registration_root": meta_values.get("registration_root", ""),
+                    "revocation_root": meta_values.get("revocation_root", ""),
+                    "is_reencrypted": meta_values.get("is_reencrypted", "0"),
+                }
+                (temp_dir / f"{bundle_id}_bundle.bin").write_bytes(bundle_bin_bytes)
+                write_key_values(temp_dir / f"{bundle_id}_bundle.meta", sanitized_values)
                 result = self._run_script("import-upload-dir", str(temp_dir))
 
             status = HTTPStatus.OK if result.returncode == 0 else HTTPStatus.INTERNAL_SERVER_ERROR
@@ -303,7 +328,7 @@ class CsHandler(BaseHTTPRequestHandler):
                 status,
                 {
                     "status": "ok" if result.returncode == 0 else "fail",
-                    "bundle_label": label,
+                    "bundle_label": bundle_id,
                     "stdout": result.stdout,
                     "stderr": result.stderr,
                     "stored_bundle_labels": self._list_stored_bundle_labels(),
@@ -320,6 +345,7 @@ class CsHandler(BaseHTTPRequestHandler):
 
             gid = (payload.get("gid") or "").strip()
             preferred_label = (payload.get("preferred_label") or payload.get("label") or "").strip()
+            preferred_label_token_value = (payload.get("preferred_label_token") or "").strip()
             auth_token_base64 = (payload.get("auth_token_base64") or "").strip()
             shortlist_trapdoor_base64 = (payload.get("shortlist_trapdoor_base64") or "").strip()
             prover_state_base64 = (payload.get("prover_state_base64") or "").strip()
@@ -356,8 +382,10 @@ class CsHandler(BaseHTTPRequestHandler):
                 (request_dir / "auth_token.txt").write_bytes(auth_token_bytes)
                 (request_dir / "shortlist_trapdoor.bin").write_bytes(shortlist_trapdoor_bytes)
                 (request_dir / "gid.txt").write_text(gid, encoding="utf-8")
-                if preferred_label:
-                    (request_dir / "preferred_label.txt").write_text(preferred_label, encoding="utf-8")
+                if preferred_label_token_value:
+                    (request_dir / "preferred_label_token.txt").write_text(preferred_label_token_value, encoding="utf-8")
+                elif preferred_label:
+                    (request_dir / "preferred_label_token.txt").write_text(label_token(preferred_label), encoding="utf-8")
                 if prover_state_bytes:
                     (request_dir / "prover_state.json").write_bytes(prover_state_bytes)
                 if proof_file_bytes:
@@ -380,7 +408,6 @@ class CsHandler(BaseHTTPRequestHandler):
                     "process-query-dir",
                     str(request_dir),
                     str(response_dir),
-                    "--skip-auth-verification",
                     "--candidate-timing-out",
                     str(candidate_timing),
                 )

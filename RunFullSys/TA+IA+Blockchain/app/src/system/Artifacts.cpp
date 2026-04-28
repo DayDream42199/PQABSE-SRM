@@ -86,8 +86,7 @@ bool SaveStoredBundleRecord(const StoredBundleRecord& record) {
     std::ofstream output(BundleMetaPath(record.bundle_label), std::ios::trunc);
     if (!output.is_open()) return false;
     output << "bundle_label=" << record.bundle_label << '\n';
-    output << "bundle_path=" << record.bundle_path << '\n';
-    output << "data_owner_gid=" << record.data_owner_gid << '\n';
+    output << "bundle_label_token=" << record.bundle_label_token << '\n';
     output << "epoch=" << record.version_tag.epoch << '\n';
     output << "registration_root=" << record.version_tag.registration_root << '\n';
     output << "revocation_root=" << record.version_tag.revocation_root << '\n';
@@ -99,12 +98,10 @@ bool LoadStoredBundleRecord(const std::string& label, StoredBundleRecord& record
     const auto values = LoadKeyValues(BundleMetaPath(label));
     if (values.empty()) return false;
     record.bundle_label = RequireValue(values, "bundle_label");
-    record.bundle_path = RequireValue(values, "bundle_path");
-    if (const auto it = values.find("data_owner_gid"); it != values.end()) {
-        record.data_owner_gid = it->second;
-    } else {
-        record.data_owner_gid = RequireValue(values, "owner_gid");
+    if (const auto it = values.find("bundle_label_token"); it != values.end()) {
+        record.bundle_label_token = it->second;
     }
+    record.bundle_path = BundleBinaryPath(record.bundle_label).string();
     record.version_tag.epoch = std::stoi(RequireValue(values, "epoch"));
     record.version_tag.registration_root = RequireValue(values, "registration_root");
     record.version_tag.revocation_root = RequireValue(values, "revocation_root");

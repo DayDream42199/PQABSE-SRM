@@ -149,11 +149,7 @@ int main(int argc, char** argv) {
         return 4;
     }
 
-    UserCredentialRecord user_record;
-    if (!LoadUserCredentialRecord(token.user_gid, user_record)) {
-        std::cerr << "Failed to load user credential record for " << token.user_gid << std::endl;
-        return 4;
-    }
+    UserRecord user_record{token.user_gid, token.zk_id, "", token.leaf_index, false};
 
     const auto preferred_label = cli.Get("--preferred-label").empty()
         ? [&]() {
@@ -162,12 +158,27 @@ int main(int argc, char** argv) {
               return value;
           }()
         : cli.Get("--preferred-label");
+    std::string preferred_label_token;
+    ReadTextFile(request_dir / "preferred_label_token.txt", preferred_label_token);
+
+    if (!rekey_state.update_token_seed.empty()) {
+        TrustedAuthority ta;
+        std::string expected_token;
+        if (!ta.generate_update_token_for_user(user_record, Blockchain.current_state.epoch, rekey_state.update_token_seed, expected_token)) {
+            std::cerr << "Failed to derive expected update token" << std::endl;
+            return 5;
+        }
+        if (token.update_token.empty() || token.update_token != expected_token) {
+            std::cerr << "Missing or invalid update token for user " << token.user_gid << std::endl;
+            return 5;
+        }
+    }
 
     TrustedAuthority ta;
     std::string epoch_bitmap_key;
     if (!ta.derive_bitmap_epoch_key(Blockchain.current_state.epoch, epoch_bitmap_key)) {
         std::cerr << "Failed to derive epoch bitmap key" << std::endl;
-        return 5;
+        return 6;
     }
 
     const auto search_index = LoadOrBuildSearchIndex(params, Blockchain.current_state.epoch);
@@ -177,7 +188,20 @@ int main(int argc, char** argv) {
             BuildEpochBitmapKeys(shortlist_trapdoor.keyword_tokens, Blockchain.current_state.epoch, epoch_bitmap_key)));
     const double candidate_generation_ms = ElapsedMilliseconds(candidate_start, Clock::now());
 
-    if (!preferred_label.empty()) {
+    if (!preferred_label_token.empty()) {
+        std::vector<std::string> filtered_labels;
+        filtered_labels.reserve(candidate_labels.size());
+        for (const auto& label : candidate_labels) {
+            StoredBundleRecord record;
+            if (!LoadStoredBundleRecord(label, record)) {
+                continue;
+            }
+            if (record.bundle_label_token == preferred_label_token) {
+                filtered_labels.push_back(label);
+            }
+        }
+        candidate_labels = std::move(filtered_labels);
+    } else if (!preferred_label.empty()) {
         candidate_labels.erase(
             std::remove_if(candidate_labels.begin(), candidate_labels.end(),
                            [&](const std::string& label) { return label != preferred_label; }),
@@ -226,7 +250,7 @@ int main(int argc, char** argv) {
         if (!Match(bundle, shortlist_trapdoor, matched_keywords)) {
             continue;
         }
-        if (!PolicySatisfied(user_record.attributes, bundle.logical_policy)) {
+        if (!PolicySatisfied(token.attributes, bundle.logical_policy)) {
             continue;
         }
 

@@ -58,13 +58,16 @@ int main(int argc, char** argv) {
     }
 
     User user(gid, credential.identity_secret, true);
-    if (!user.request_zkp_authentication(ia)) {
+    if (!user.request_zkp_authentication(ia, credential.attributes)) {
         std::cerr << "Failed to obtain proof-backed authentication token" << std::endl;
         return 6;
     }
 
+    AuthToken token = user.get_auth_token();
+    token.update_token = provided_token;
+
     std::filesystem::create_directories(request_dir);
-    if (!SaveAuthToken(user.get_auth_token(), request_dir / "auth_token.txt")) {
+    if (!SaveAuthToken(token, request_dir / "auth_token.txt")) {
         std::cerr << "Failed to write auth token" << std::endl;
         return 7;
     }

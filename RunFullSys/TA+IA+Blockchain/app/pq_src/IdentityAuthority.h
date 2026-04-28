@@ -26,6 +26,8 @@ public:
 struct AuthToken {
     std::string user_gid;
     std::string zk_id;
+    std::vector<std::string> attributes;
+    std::string update_token;
     int nonce;
     std::int64_t issued_at_unix;
     int leaf_index;
@@ -72,7 +74,8 @@ private:
                                    const VersionTag& tag,
                                    const std::string& registration_root,
                                    int nonce,
-                                   std::int64_t issued_at_unix) const;
+                                   std::int64_t issued_at_unix,
+                                   const std::vector<std::string>& attributes) const;
     bool refresh_zk_roots();
     bool load_state();
     bool save_state() const;
@@ -84,6 +87,7 @@ public:
 
     UserRecord register_user(std::string user_gid, int identity_secret);
     bool authenticate_user(const std::string& user_gid, AuthToken& token);
+    bool authenticate_user(const std::string& user_gid, const std::vector<std::string>& attributes, AuthToken& token);
     bool get_registration_auth_path(const std::string& user_gid, std::vector<MerkleProofNode>& auth_path) const;
     bool revoke_user(const std::string& user_gid);
     bool is_registered(const std::string& user_gid) const;

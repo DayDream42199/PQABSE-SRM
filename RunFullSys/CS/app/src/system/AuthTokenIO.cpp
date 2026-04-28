@@ -30,6 +30,29 @@ std::vector<uint8_t> HexToBytes(const std::string& hex) {
     return bytes;
 }
 
+std::string JoinStrings(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << values[index];
+    }
+    return out.str();
+}
+
+std::vector<std::string> SplitStrings(const std::string& joined) {
+    std::vector<std::string> values;
+    std::stringstream input(joined);
+    std::string item;
+    while (std::getline(input, item, ',')) {
+        if (!item.empty()) {
+            values.push_back(item);
+        }
+    }
+    return values;
+}
+
 }  // namespace
 
 bool SaveAuthToken(const AuthToken& token, const std::filesystem::path& path) {
@@ -40,6 +63,8 @@ bool SaveAuthToken(const AuthToken& token, const std::filesystem::path& path) {
     }
     out << "user_gid=" << token.user_gid << '\n';
     out << "zk_id=" << token.zk_id << '\n';
+    out << "attributes=" << JoinStrings(token.attributes) << '\n';
+    out << "update_token=" << token.update_token << '\n';
     out << "nonce=" << token.nonce << '\n';
     out << "issued_at_unix=" << token.issued_at_unix << '\n';
     out << "leaf_index=" << token.leaf_index << '\n';
@@ -74,6 +99,8 @@ bool LoadAuthToken(const std::filesystem::path& path, AuthToken& token) {
     }
     token.user_gid = values["user_gid"];
     token.zk_id = values["zk_id"];
+    token.attributes = SplitStrings(values["attributes"]);
+    token.update_token = values["update_token"];
     token.nonce = std::stoi(values["nonce"]);
     token.issued_at_unix = std::stoll(values["issued_at_unix"]);
     token.leaf_index = std::stoi(values["leaf_index"]);
