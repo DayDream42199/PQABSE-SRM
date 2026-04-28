@@ -163,20 +163,7 @@ roaring::Roaring SearchOptimizationLayer::ExecuteAdaptiveSearch(std::vector<std:
         }
     }
 
-    double total_cardinality = 0.0;
-    for (const auto& bitmap_key : bitmap_keys) {
-        total_cardinality += static_cast<double>(inverted_index_.at(bitmap_key).cardinality());
-    }
-    const double average_cardinality = total_cardinality / static_cast<double>(bitmap_keys.size());
-    const double query_complexity = static_cast<double>(bitmap_keys.size()) * average_cardinality;
-
-    if (query_complexity < threshold_tau_) {
-        std::sort(bitmap_keys.begin(), bitmap_keys.end(), [this](const std::string& lhs, const std::string& rhs) {
-            return inverted_index_.at(lhs).cardinality() < inverted_index_.at(rhs).cardinality();
-        });
-        return inverted_index_.at(bitmap_keys.front());
-    }
-
+    // For exact-match experiments, always intersect all query bitmaps.
     return PruneCandidates(std::move(bitmap_keys));
 }
 

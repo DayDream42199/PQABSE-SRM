@@ -1,3 +1,7 @@
 reference/
 __pycache__/
 *.pyc
+experiment_results/
+reference_experiment_results/
+RunFullSys/file_count_test_corpus/generated/
+RunFullSys/reference_test_corpus/generated/
