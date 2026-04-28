@@ -27,6 +27,10 @@ struct SearchResult {
 void TrapGen(const SystemParams& params, const UserSecretKey& user_sk, const std::array<unsigned char, 16>& file_nonce,
              const std::string& label, const std::vector<std::string>& query_keywords, SearchTrapdoor& trapdoor);
 bool Match(const CiphertextBundle& bundle, const SearchTrapdoor& trapdoor, std::vector<std::string>& matched_keywords);
+std::size_t CountKeywordMatches(const CiphertextBundle& bundle, const SearchTrapdoor& trapdoor,
+                                std::vector<std::string>& matched_keywords);
+bool MatchAtLeast(const CiphertextBundle& bundle, const SearchTrapdoor& trapdoor, std::size_t min_match_count,
+                  std::vector<std::string>& matched_keywords);
 bool RetrieveAndDecrypt(const SystemParams& params, const UserSecretKey& user_sk, const CiphertextBundle& bundle,
                         const SearchTrapdoor& trapdoor, SearchResult& result);
 bool SaveSearchTrapdoor(const SystemParams& params, const SearchTrapdoor& trapdoor, const std::string& path);

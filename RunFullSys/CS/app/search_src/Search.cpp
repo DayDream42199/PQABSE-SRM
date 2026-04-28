@@ -163,8 +163,44 @@ roaring::Roaring SearchOptimizationLayer::ExecuteAdaptiveSearch(std::vector<std:
         }
     }
 
-    // For exact-match experiments, always intersect all query bitmaps.
+    double total_cardinality = 0.0;
+    for (const auto& bitmap_key : bitmap_keys) {
+        total_cardinality += static_cast<double>(inverted_index_.at(bitmap_key).cardinality());
+    }
+    const double average_cardinality = total_cardinality / static_cast<double>(bitmap_keys.size());
+    const double query_complexity = static_cast<double>(bitmap_keys.size()) * average_cardinality;
+
+    if (query_complexity < threshold_tau_) {
+        std::sort(bitmap_keys.begin(), bitmap_keys.end(), [this](const std::string& lhs, const std::string& rhs) {
+            return inverted_index_.at(lhs).cardinality() < inverted_index_.at(rhs).cardinality();
+        });
+        return inverted_index_.at(bitmap_keys.front());
+    }
+
     return PruneCandidates(std::move(bitmap_keys));
+}
+
+roaring::Roaring SearchOptimizationLayer::CollectCandidatesAny(std::vector<std::string> bitmap_keys) const {
+    if (bitmap_keys.empty()) {
+        return roaring::Roaring();
+    }
+
+    roaring::Roaring candidate_set;
+    bool has_any_bitmap = false;
+    for (const auto& bitmap_key : bitmap_keys) {
+        const auto it = inverted_index_.find(bitmap_key);
+        if (it == inverted_index_.end()) {
+            continue;
+        }
+        if (!has_any_bitmap) {
+            candidate_set = it->second;
+            has_any_bitmap = true;
+        } else {
+            candidate_set |= it->second;
+        }
+    }
+
+    return has_any_bitmap ? candidate_set : roaring::Roaring();
 }
 
 std::vector<std::string> SearchOptimizationLayer::ResolveLabels(const roaring::Roaring& candidate_ids) const {

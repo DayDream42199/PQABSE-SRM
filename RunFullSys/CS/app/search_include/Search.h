@@ -29,6 +29,7 @@ public:
                               const std::string& epoch_bitmap_key);
     void OptimizeAllBitmaps();
     roaring::Roaring ExecuteAdaptiveSearch(std::vector<std::string> bitmap_keys) const;
+    roaring::Roaring CollectCandidatesAny(std::vector<std::string> bitmap_keys) const;
     roaring::Roaring PruneCandidates(std::vector<std::string> bitmap_keys) const;
     std::vector<std::string> ResolveLabels(const roaring::Roaring& candidate_ids) const;
     std::vector<std::string> KnownLabels() const;

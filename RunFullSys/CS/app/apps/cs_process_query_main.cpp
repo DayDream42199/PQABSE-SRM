@@ -92,6 +92,22 @@ SearchOptimizationLayer LoadOrBuildSearchIndex(const SystemParams& params, int e
     return rebuilt;
 }
 
+std::size_t DefaultMinMatchCount(const SearchTrapdoor& trapdoor) {
+    if (trapdoor.query_keywords.empty()) {
+        return 0;
+    }
+    if (trapdoor.query_keywords.size() < 3) {
+        return 1;
+    }
+    return 2;
+}
+
+struct RankedBundleMatch {
+    std::string label;
+    std::size_t matched_count = 0;
+    StoredBundleRecord record;
+};
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -100,6 +116,7 @@ int main(int argc, char** argv) {
     CliArgs cli(argc, argv);
     const auto candidate_timing_out = cli.Get("--candidate-timing-out");
     const bool skip_auth_verification = cli.HasFlag("--skip-auth-verification");
+    const std::size_t max_results = static_cast<std::size_t>(std::stoul(cli.Get("--max-results", "10")));
 
     const auto request_dir = std::filesystem::path(cli.Require("--request-dir"));
     const auto response_dir = std::filesystem::path(cli.Require("--response-dir"));
@@ -160,6 +177,8 @@ int main(int argc, char** argv) {
         : cli.Get("--preferred-label");
     std::string preferred_label_token;
     ReadTextFile(request_dir / "preferred_label_token.txt", preferred_label_token);
+    const std::size_t min_match_count = static_cast<std::size_t>(
+        std::stoul(cli.Get("--min-match", std::to_string(DefaultMinMatchCount(shortlist_trapdoor)))));
 
     if (!rekey_state.update_token_seed.empty() &&
         rekey_state.epoch == Blockchain.current_state.epoch) {
@@ -185,7 +204,7 @@ int main(int argc, char** argv) {
     const auto search_index = LoadOrBuildSearchIndex(params, Blockchain.current_state.epoch);
     const auto candidate_start = Clock::now();
     auto candidate_labels = search_index.ResolveLabels(
-        search_index.ExecuteAdaptiveSearch(
+        search_index.CollectCandidatesAny(
             BuildEpochBitmapKeys(shortlist_trapdoor.keyword_tokens, Blockchain.current_state.epoch, epoch_bitmap_key)));
     const double candidate_generation_ms = ElapsedMilliseconds(candidate_start, Clock::now());
 
@@ -210,7 +229,9 @@ int main(int argc, char** argv) {
     }
 
     std::filesystem::create_directories(response_dir / "bundles");
-    std::size_t exact_match_count = 0;
+    const std::size_t candidate_count = candidate_labels.size();
+    std::vector<RankedBundleMatch> ranked_matches;
+    ranked_matches.reserve(candidate_labels.size());
     for (const auto& label : candidate_labels) {
         StoredBundleRecord record;
         if (!LoadStoredBundleRecord(label, record)) {
@@ -248,22 +269,34 @@ int main(int argc, char** argv) {
         }
 
         std::vector<std::string> matched_keywords;
-        if (!Match(bundle, shortlist_trapdoor, matched_keywords)) {
+        const std::size_t matched_count = CountKeywordMatches(bundle, shortlist_trapdoor, matched_keywords);
+        if (matched_count < min_match_count) {
             continue;
         }
         if (!PolicySatisfied(token.attributes, bundle.logical_policy)) {
             continue;
         }
-
-        const auto response_bundle_path = response_dir / "bundles" / (label + "_bundle.bin");
-        const auto response_meta_path = response_dir / "bundles" / (label + "_bundle.meta");
-        std::filesystem::copy_file(record.bundle_path, response_bundle_path, std::filesystem::copy_options::overwrite_existing);
-        std::filesystem::copy_file(BundleMetaPath(label), response_meta_path, std::filesystem::copy_options::overwrite_existing);
-        ++exact_match_count;
+        ranked_matches.push_back({label, matched_count, std::move(record)});
     }
 
-    WriteTextFile(response_dir / "candidate_count.txt", std::to_string(exact_match_count));
-    WriteTextFile(response_dir / "exact_match_count.txt", std::to_string(exact_match_count));
+    std::sort(ranked_matches.begin(), ranked_matches.end(), [](const RankedBundleMatch& lhs, const RankedBundleMatch& rhs) {
+        if (lhs.matched_count != rhs.matched_count) {
+            return lhs.matched_count > rhs.matched_count;
+        }
+        return lhs.label < rhs.label;
+    });
+
+    const std::size_t returned_count = std::min(max_results, ranked_matches.size());
+    for (std::size_t index = 0; index < returned_count; ++index) {
+        const auto& match = ranked_matches[index];
+        const auto response_bundle_path = response_dir / "bundles" / (match.label + "_bundle.bin");
+        const auto response_meta_path = response_dir / "bundles" / (match.label + "_bundle.meta");
+        std::filesystem::copy_file(match.record.bundle_path, response_bundle_path, std::filesystem::copy_options::overwrite_existing);
+        std::filesystem::copy_file(BundleMetaPath(match.label), response_meta_path, std::filesystem::copy_options::overwrite_existing);
+    }
+
+    WriteTextFile(response_dir / "candidate_count.txt", std::to_string(candidate_count));
+    WriteTextFile(response_dir / "exact_match_count.txt", std::to_string(returned_count));
     WriteTextFile(response_dir / "epoch.txt", std::to_string(Blockchain.current_state.epoch));
     if (!candidate_timing_out.empty()) {
         std::ostringstream output;
@@ -275,7 +308,11 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "CS response prepared at " << response_dir << std::endl;
-    std::cout << "Candidates: " << candidate_labels.size() << ", exact matches: " << exact_match_count << std::endl;
+    std::cout << "Candidates: " << candidate_count
+              << ", qualifying matches: " << ranked_matches.size()
+              << ", returned: " << returned_count
+              << ", min-match: " << min_match_count
+              << ", max-results: " << max_results << std::endl;
     std::cout << "Candidate generation ms: " << std::fixed << std::setprecision(3) << candidate_generation_ms << std::endl;
     return 0;
 }

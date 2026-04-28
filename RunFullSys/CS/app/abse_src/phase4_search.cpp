@@ -124,6 +124,29 @@ bool Match(const CiphertextBundle& bundle, const SearchTrapdoor& trapdoor, std::
     return true;
 }
 
+std::size_t CountKeywordMatches(const CiphertextBundle& bundle, const SearchTrapdoor& trapdoor,
+                                std::vector<std::string>& matched_keywords) {
+    matched_keywords.clear();
+    for (size_t i = 0; i < trapdoor.keyword_tokens.size(); ++i) {
+        for (const auto& entry : bundle.secure_index) {
+            if (ElementsEqual(trapdoor.keyword_tokens[i], entry)) {
+                matched_keywords.push_back(trapdoor.query_keywords[i]);
+                break;
+            }
+        }
+    }
+    return matched_keywords.size();
+}
+
+bool MatchAtLeast(const CiphertextBundle& bundle, const SearchTrapdoor& trapdoor, std::size_t min_match_count,
+                  std::vector<std::string>& matched_keywords) {
+    if (min_match_count == 0) {
+        matched_keywords.clear();
+        return true;
+    }
+    return CountKeywordMatches(bundle, trapdoor, matched_keywords) >= min_match_count;
+}
+
 bool RetrieveAndDecrypt(const SystemParams& params, const UserSecretKey& user_sk, const CiphertextBundle& bundle,
                         const SearchTrapdoor& trapdoor, SearchResult& result) {
     result = {};
