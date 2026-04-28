@@ -38,11 +38,11 @@ int main(int argc, char** argv) {
         return 3;
     }
 
+    std::string provided_token;
     if (!rekey_state.update_token_seed.empty() &&
         credential.local_epoch < Blockchain.current_state.epoch) {
         TrustedAuthority ta;
         std::string expected_token;
-        std::string provided_token;
         if (!ta.generate_update_token_for_user(user_record,
                                                Blockchain.current_state.epoch,
                                                rekey_state.update_token_seed,
