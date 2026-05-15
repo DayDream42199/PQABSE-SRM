@@ -25,6 +25,7 @@
     <string name="attributes_hint">Attributes (comma separated)</string>
     <string name="bundle_label_hint">Bundle Label</string>
     <string name="plaintext_hint">Plaintext</string>
+    <string name="pick_plaintext_file">Load File</string>
     <string name="keywords_hint">Keywords (comma separated)</string>
     <string name="policy_attrs_hint">Policy Expression: AND(ai,OR(cpe,doctor)) or 2-of-3(ai,cpe,doctor)</string>
     <string name="preferred_label_hint">Preferred Label (optional)</string>
@@ -45,6 +46,7 @@
     <string name="generate_query_artifacts">Generate Query Artifacts</string>
     <string name="submit_query">Submit Query To CS</string>
     <string name="decrypt_query_result">Decrypt Latest Query Result</string>
+    <string name="save_decrypted_file">Save Latest Decrypted File</string>
     <string name="run_mobile_benchmarks">Run Mobile Benchmarks</string>
     <string name="show_benchmark_files">Show Benchmark Files</string>
     <string name="native_bridge_status">Native Bridge Status</string>
