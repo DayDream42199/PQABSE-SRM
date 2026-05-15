@@ -1,0 +1,2 @@
+PQABSESRMMobileHTTP/app/src/main/native-prebuilt/**/*.a filter=lfs diff=lfs merge=lfs -text
+PQABSESRMMobileHTTP/app/src/main/native-prebuilt/**/*.so filter=lfs diff=lfs merge=lfs -text
