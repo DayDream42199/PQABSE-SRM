@@ -793,6 +793,42 @@ bool Match(const CiphertextBundle& bundle,
     return true;
 }
 
+size_t CountKeywordMatches(const CiphertextBundle& bundle,
+                           const SearchTrapdoor& trapdoor,
+                           std::vector<std::string>& matchedKeywords) {
+    matchedKeywords.clear();
+    for (size_t i = 0; i < trapdoor.keyword_tokens.size(); ++i) {
+        for (const auto& entry : bundle.secure_index) {
+            if (ElementsEqual(trapdoor.keyword_tokens[i], entry)) {
+                matchedKeywords.push_back(trapdoor.query_keywords[i]);
+                break;
+            }
+        }
+    }
+    return matchedKeywords.size();
+}
+
+size_t DefaultMinMatchCount(const SearchTrapdoor& trapdoor) {
+    if (trapdoor.query_keywords.empty()) {
+        return 0;
+    }
+    if (trapdoor.query_keywords.size() < 3) {
+        return 1;
+    }
+    return 2;
+}
+
+bool MatchAtLeast(const CiphertextBundle& bundle,
+                  const SearchTrapdoor& trapdoor,
+                  size_t minMatchCount,
+                  std::vector<std::string>& matchedKeywords) {
+    if (minMatchCount == 0) {
+        matchedKeywords.clear();
+        return true;
+    }
+    return CountKeywordMatches(bundle, trapdoor, matchedKeywords) >= minMatchCount;
+}
+
 bool EvaluatePolicy(const std::set<std::string>& attributes, const LogicalPolicy& policy) {
     switch (policy.kind) {
         case PolicyKind::Attribute:
@@ -1014,8 +1050,10 @@ Java_com_example_pqabse_1srmmobilehttp_NativeBridge_decryptLatestQueryResult(
         }
 
         std::vector<std::string> matchedKeywords;
-        if (!Match(bundle, trapdoor, matchedKeywords)) {
-            const std::string error = BuildDecryptErrorJson("Bundle keywords do not match the shortlist trapdoor");
+        const size_t minMatchCount = DefaultMinMatchCount(trapdoor);
+        if (!MatchAtLeast(bundle, trapdoor, minMatchCount, matchedKeywords)) {
+            const std::string error = BuildDecryptErrorJson(
+                "Bundle keywords do not satisfy the shortlist min-match rule");
             return env->NewStringUTF(error.c_str());
         }
 

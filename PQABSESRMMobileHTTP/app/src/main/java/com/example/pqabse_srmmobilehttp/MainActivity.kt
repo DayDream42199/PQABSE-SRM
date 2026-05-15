@@ -1,9 +1,12 @@
 package com.example.pqabse_srmmobilehttp
 
+import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import android.view.View
 import android.webkit.WebView
+import android.widget.ScrollView
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -11,9 +14,12 @@ import android.widget.Toast
 import android.util.Base64
 import com.google.android.material.textfield.TextInputEditText
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.doAfterTextChanged
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -28,6 +34,7 @@ import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.security.MessageDigest
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -38,6 +45,12 @@ import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 class MainActivity : AppCompatActivity() {
+    private data class DecryptedFilePayload(
+        val fileName: String,
+        val mimeType: String,
+        val bytes: ByteArray
+    )
+
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private var lastRegisterResponseBody: String? = null
     private var lastQueryResponseBody: String? = null
@@ -112,10 +125,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var registerButton: Button
     private lateinit var revokeTargetButton: Button
     private lateinit var refreshUserButton: Button
+    private lateinit var pickPlaintextFileButton: Button
     private lateinit var encryptButton: Button
     private lateinit var generateQueryArtifactsButton: Button
     private lateinit var submitQueryButton: Button
     private lateinit var decryptQueryResultButton: Button
+    private lateinit var saveDecryptedFileButton: Button
     private lateinit var runMobileBenchmarksButton: Button
     private lateinit var showBenchmarkFilesButton: Button
     private lateinit var nativeStatusButton: Button
@@ -124,6 +139,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var outputText: TextView
     private lateinit var proofWebView: WebView
     private lateinit var localZkProver: LocalZkProver
+    private var selectedFileEnvelopeJson: String? = null
+    private var suppressPlaintextWatcher = false
+    private var latestDecryptedFilePayload: DecryptedFilePayload? = null
+    private val pickPlaintextFileLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                loadSelectedPlaintextFile(uri)
+            }
+        }
+    private val saveDecryptedFileLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+            if (uri != null) {
+                saveLatestDecryptedFile(uri)
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -158,10 +188,12 @@ class MainActivity : AppCompatActivity() {
         registerButton = findViewById(R.id.registerButton)
         revokeTargetButton = findViewById(R.id.revokeTargetButton)
         refreshUserButton = findViewById(R.id.refreshUserButton)
+        pickPlaintextFileButton = findViewById(R.id.pickPlaintextFileButton)
         encryptButton = findViewById(R.id.encryptButton)
         generateQueryArtifactsButton = findViewById(R.id.generateQueryArtifactsButton)
         submitQueryButton = findViewById(R.id.submitQueryButton)
         decryptQueryResultButton = findViewById(R.id.decryptQueryResultButton)
+        saveDecryptedFileButton = findViewById(R.id.saveDecryptedFileButton)
         runMobileBenchmarksButton = findViewById(R.id.runMobileBenchmarksButton)
         showBenchmarkFilesButton = findViewById(R.id.showBenchmarkFilesButton)
         nativeStatusButton = findViewById(R.id.nativeStatusButton)
@@ -170,12 +202,31 @@ class MainActivity : AppCompatActivity() {
         outputText = findViewById(R.id.outputText)
         proofWebView = findViewById(R.id.proofWebView)
         localZkProver = LocalZkProver(this, proofWebView)
+        saveDecryptedFileButton.isEnabled = false
+        plaintextInput.doAfterTextChanged {
+            if (!suppressPlaintextWatcher) {
+                selectedFileEnvelopeJson = null
+            }
+        }
 
         loadSavedConfig()
 
         saveConfigButton.setOnClickListener {
             saveConfig()
             showToast("Configuration saved")
+        }
+
+        pickPlaintextFileButton.setOnClickListener {
+            pickPlaintextFileLauncher.launch(arrayOf("*/*"))
+        }
+
+        saveDecryptedFileButton.setOnClickListener {
+            val payload = latestDecryptedFilePayload
+            if (payload == null) {
+                showToast("Decrypt a file bundle first")
+                return@setOnClickListener
+            }
+            saveDecryptedFileLauncher.launch(payload.fileName)
         }
 
         fetchStateButton.setOnClickListener {
@@ -290,7 +341,7 @@ class MainActivity : AppCompatActivity() {
             val csBaseUrl = csUrlInput.text?.toString()?.trim().orEmpty()
             val ownerGid = gidInput.text?.toString()?.trim().orEmpty()
             val bundleLabel = bundleLabelInput.text?.toString()?.trim().orEmpty()
-            val plaintext = plaintextInput.text?.toString()?.trim().orEmpty()
+            val plaintext = selectedFileEnvelopeJson ?: plaintextInput.text?.toString().orEmpty()
             val keywords = parseCsv(keywordsInput.text?.toString().orEmpty())
             val policyRaw = policyAttrsInput.text?.toString().orEmpty()
             if (edgeBaseUrl.isBlank()) {
@@ -306,7 +357,7 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             if (plaintext.isBlank()) {
-                showToast("Enter plaintext to encrypt")
+                showToast("Enter plaintext to encrypt or load a file")
                 return@setOnClickListener
             }
             if (keywords.isEmpty()) {
@@ -347,17 +398,19 @@ class MainActivity : AppCompatActivity() {
                         "CS import skipped: no CS URL configured"
                     }
                     runOnUiThread {
-                        outputText.text = buildString {
-                            appendLine("Encrypt Bundle")
-                            appendLine(encryptResponse)
-                            appendLine()
-                            append(importResponse)
-                        }.trimEnd()
+                        showStatusResult(
+                            "Encrypt Bundle",
+                            buildString {
+                                appendLine(encryptResponse)
+                                appendLine()
+                                append(importResponse)
+                            }.trimEnd()
+                        )
                         setLoading(false)
                     }
                 } catch (exc: Exception) {
                     runOnUiThread {
-                        outputText.text = "Encrypt Bundle\nError: ${exc.message}"
+                        showStatusError("Encrypt Bundle", exc)
                         setLoading(false)
                     }
                 }
@@ -419,7 +472,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         localZkProver.generateProof(inputJson) { proveResult ->
                             proveResult.onFailure { error ->
-                                outputText.text = "Generate Query Artifacts\nError: ${error.message}"
+                                showStatusError("Generate Query Artifacts", error)
                                 setLoading(false)
                             }
                             proveResult.onSuccess { proofArtifacts ->
@@ -469,25 +522,33 @@ class MainActivity : AppCompatActivity() {
                                             lastPhase1ParamsBase64 = phase1Params.ifBlank { lastPhase1ParamsBase64 }
                                             saveConfig()
                                             refreshGeneratedSecretPreviews()
-                                            outputText.text = buildString {
-                                                appendLine("Generate Query Artifacts")
-                                                appendLine("HTTP 200")
-                                                appendLine("status = ok")
-                                                appendLine("gid = $gid")
-                                                appendLine("auth_package = received")
-                                                appendLine("verification_key = ${if (verificationKey.isNotBlank()) "received" else "missing"}")
-                                                appendLine("phase1_params = ${if (phase1Params.isNotBlank()) "received" else "cached"}")
-                                                appendLine("Local prove")
-                                                appendLine("elapsed_ms = ${"%.3f".format(Locale.US, proofArtifacts.elapsedMs)}")
-                                                appendLine("Trapdoor")
-                                                appendLine("status = ${trapdoorJson.optString("status")}")
-                                                append("shortlist_trapdoor = generated")
-                                            }.trimEnd()
+                                            showStatusResult(
+                                                "Generate Query Artifacts",
+                                                buildString {
+                                                    appendLine("HTTP 200")
+                                                    appendLine("status = ok")
+                                                    appendLine("gid = $gid")
+                                                    appendLine("auth_package = received")
+                                                    appendLine("verification_key = ${if (verificationKey.isNotBlank()) "received" else "missing"}")
+                                                    appendLine("phase1_params = ${if (phase1Params.isNotBlank()) "received" else "cached"}")
+                                                    appendLine("Local prove")
+                                                    appendLine("elapsed_ms = ${"%.3f".format(Locale.US, proofArtifacts.elapsedMs)}")
+                                                    appendLine("Trapdoor")
+                                                    appendLine("status = ${trapdoorJson.optString("status")}")
+                                                    appendLine("auth_token_base64 = $authToken")
+                                                    appendLine("shortlist_trapdoor_base64 = $shortlistTrapdoor")
+                                                    appendLine("prover_state_base64 = $proverState")
+                                                    appendLine("proof_file_base64 = $proofFileBase64")
+                                                    appendLine("public_file_base64 = $publicFileBase64")
+                                                    appendLine("verification_key_base64 = $verificationKey")
+                                                    append("request_archive_base64 = $requestArchive")
+                                                }.trimEnd()
+                                            )
                                             setLoading(false)
                                         }
                                     } catch (exc: Exception) {
                                         runOnUiThread {
-                                            outputText.text = "Generate Query Artifacts\nError: ${exc.message}"
+                                            showStatusError("Generate Query Artifacts", exc)
                                             setLoading(false)
                                         }
                                     }
@@ -497,7 +558,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } catch (exc: Exception) {
                     runOnUiThread {
-                        outputText.text = "Generate Query Artifacts\nError: ${exc.message}"
+                        showStatusError("Generate Query Artifacts", exc)
                         setLoading(false)
                     }
                 }
@@ -544,16 +605,17 @@ class MainActivity : AppCompatActivity() {
                         ) {
                             val queryJson = parseQueryArchiveResponse(archiveResponse.bodyBytes)
                             lastQueryResponseBody = queryJson
-                            formatHttpResponse(archiveResponse.statusCode, queryJson)
+                            summarizeQueryResponse(queryJson, archiveResponse.statusCode)
                         } else {
                             val responseBody = archiveResponse.bodyBytes.toString(Charsets.UTF_8).ifBlank { "<empty response>" }
-                            formatHttpResponse(archiveResponse.statusCode, responseBody)
+                            lastQueryResponseBody = responseBody
+                            summarizeQueryResponse(responseBody, archiveResponse.statusCode)
                         }
                     } ?: run {
                         val payload = JSONObject().apply {
                             put("gid", gid)
-                            if (preferredLabel.isNotBlank()) {
-                                put("preferred_label", preferredLabel)
+                            preferredLabel.takeIf { it.isNotBlank() }?.let {
+                                put("preferred_label_token", sha256Hex(it))
                             }
                             put("auth_token_base64", authTokenBase64)
                             put("shortlist_trapdoor_base64", shortlistTrapdoorBase64)
@@ -562,16 +624,17 @@ class MainActivity : AppCompatActivity() {
                             generatedPublicFileBase64?.takeIf { it.isNotBlank() }?.let { put("public_file_base64", it) }
                         }
                         val response = httpPostJson("${csBaseUrl.trimEnd('/')}/mobile/query", payload)
-                        lastQueryResponseBody = extractResponseBody(response)
-                        response
+                        val responseBody = extractResponseBody(response)
+                        lastQueryResponseBody = responseBody
+                        summarizeQueryResponse(responseBody)
                     }
                     runOnUiThread {
-                        outputText.text = "Submit Query\n$responseText"
+                        showStatusResult("Submit Query", responseText)
                         setLoading(false)
                     }
                 } catch (exc: Exception) {
                     runOnUiThread {
-                        outputText.text = "Submit Query\nError: ${exc.message}"
+                        showStatusError("Submit Query", exc)
                         setLoading(false)
                     }
                 }
@@ -579,6 +642,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         decryptQueryResultButton.setOnClickListener {
+            latestDecryptedFilePayload = null
+            saveDecryptedFileButton.isEnabled = false
             val queryResponseBody = lastQueryResponseBody.orEmpty()
             val shortlistTrapdoorBase64 = generatedShortlistTrapdoorBase64
             val activeQueryGid = queryGidInput.text?.toString()?.trim().orEmpty().ifBlank { gidInput.text?.toString()?.trim().orEmpty() }
@@ -615,9 +680,9 @@ class MainActivity : AppCompatActivity() {
                     )
                     bundle to nativeResult
                 }
-                outputText.text = buildDecryptResultsOutput(decryptedResults)
+                showStatusResult("Decrypt Query Result", buildDecryptResultsOutput(decryptedResults))
             } catch (exc: Exception) {
-                outputText.text = "Decrypt Query Result\nError: ${exc.message}"
+                showStatusError("Decrypt Query Result", exc)
             }
         }
 
@@ -628,16 +693,18 @@ class MainActivity : AppCompatActivity() {
 
         showBenchmarkFilesButton.setOnClickListener {
             val benchmarkDir = benchmarkDirectory()
-            outputText.text = buildString {
-                appendLine("Mobile Benchmark Files")
-                appendLine("directory = ${benchmarkDir.absolutePath}")
-                appendLine("runs_csv = ${mobileBenchmarkRunsFile().absolutePath}")
-                append("averages_csv = ${mobileBenchmarkAveragesFile().absolutePath}")
-            }.trimEnd()
+            showStatusResult(
+                "Mobile Benchmark Files",
+                buildString {
+                    appendLine("directory = ${benchmarkDir.absolutePath}")
+                    appendLine("runs_csv = ${mobileBenchmarkRunsFile().absolutePath}")
+                    append("averages_csv = ${mobileBenchmarkAveragesFile().absolutePath}")
+                }.trimEnd()
+            )
         }
 
         nativeStatusButton.setOnClickListener {
-            outputText.text = "Native Bridge\n${NativeBridge.getBridgeStatus()}"
+            showStatusResult("Native Bridge", NativeBridge.getBridgeStatus())
         }
 
         showReturnedKeyButton.setOnClickListener {
@@ -646,7 +713,7 @@ class MainActivity : AppCompatActivity() {
                 showToast("Register a user first")
                 return@setOnClickListener
             }
-            outputText.text = buildKeyOutput(registerResponseBody)
+            showStatusResult("Returned Key", buildKeyOutput(registerResponseBody))
         }
     }
 
@@ -665,12 +732,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         setLoading(true)
-        outputText.text = buildString {
-            appendLine("Run Mobile Benchmarks")
-            appendLine("keyword_counts = ${MOBILE_BENCHMARK_KEYWORD_COUNTS.joinToString(",")}")
-            appendLine("repeats = $MOBILE_BENCHMARK_REPEATS")
-            append("Preparing benchmark files...")
-        }.trimEnd()
+        showStatusResult(
+            "Run Mobile Benchmarks",
+            buildString {
+                appendLine("keyword_counts = ${MOBILE_BENCHMARK_KEYWORD_COUNTS.joinToString(",")}")
+                appendLine("repeats = $MOBILE_BENCHMARK_REPEATS")
+                append("Preparing benchmark files...")
+            }.trimEnd()
+        )
 
         ioExecutor.execute {
             try {
@@ -710,26 +779,24 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 runOnUiThread {
-                    outputText.text = buildString {
-                        appendLine("Run Mobile Benchmarks")
-                        appendLine("status = ok")
-                        appendLine("runs_csv = ${runsFile.absolutePath}")
-                        appendLine("averages_csv = ${averagesFile.absolutePath}")
-                        appendLine("completed_runs = $completedRuns")
-                        if (statusLines.isNotEmpty()) {
-                            appendLine()
-                            statusLines.takeLast(8).forEach(::appendLine)
-                        }
-                    }.trimEnd()
+                    showStatusResult(
+                        "Run Mobile Benchmarks",
+                        buildString {
+                            appendLine("status = ok")
+                            appendLine("runs_csv = ${runsFile.absolutePath}")
+                            appendLine("averages_csv = ${averagesFile.absolutePath}")
+                            appendLine("completed_runs = $completedRuns")
+                            if (statusLines.isNotEmpty()) {
+                                appendLine()
+                                statusLines.takeLast(8).forEach(::appendLine)
+                            }
+                        }.trimEnd()
+                    )
                     setLoading(false)
                 }
             } catch (exc: Exception) {
                 runOnUiThread {
-                    outputText.text = buildString {
-                        appendLine("Run Mobile Benchmarks")
-                        appendLine("status = error")
-                        append("message = ${exc.message}")
-                    }.trimEnd()
+                    showStatusError("Run Mobile Benchmarks", exc)
                     setLoading(false)
                 }
             }
@@ -862,7 +929,9 @@ class MainActivity : AppCompatActivity() {
 
         val queryPayload = JSONObject().apply {
             put("gid", config.searcherGid)
-            put("preferred_label", benchmarkPreferredLabel)
+            benchmarkPreferredLabel.takeIf { it.isNotBlank() }?.let {
+                put("preferred_label_token", sha256Hex(it))
+            }
             put("request_id", "android-mobile-bench")
             put("request_archive_base64", requestArchive)
             put("auth_token_base64", authToken)
@@ -1188,12 +1257,12 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
                     } else if (label == "Submit Query") {
                         lastQueryResponseBody = extractResponseBody(responseText)
                     }
-                    outputText.text = "$label\n$responseText"
+                    showStatusResult(label, responseText)
                     setLoading(false)
                 }
             } catch (exc: Exception) {
                 runOnUiThread {
-                    outputText.text = "$label\nError: ${exc.message}"
+                    showStatusError(label, exc)
                     setLoading(false)
                 }
             }
@@ -1209,10 +1278,12 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         registerButton.isEnabled = !isLoading
         revokeTargetButton.isEnabled = !isLoading
         refreshUserButton.isEnabled = !isLoading
+        pickPlaintextFileButton.isEnabled = !isLoading
         encryptButton.isEnabled = !isLoading
         generateQueryArtifactsButton.isEnabled = !isLoading
         submitQueryButton.isEnabled = !isLoading
         decryptQueryResultButton.isEnabled = !isLoading
+        saveDecryptedFileButton.isEnabled = !isLoading && latestDecryptedFilePayload != null
         runMobileBenchmarksButton.isEnabled = !isLoading
         showBenchmarkFilesButton.isEnabled = !isLoading
         nativeStatusButton.isEnabled = !isLoading
@@ -1447,6 +1518,38 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         }
     }
 
+    private fun summarizeQueryResponse(body: String, statusCode: Int? = null): String {
+        return try {
+            val json = JSONObject(body)
+            val result = json.optJSONObject("result")
+            val bundles = result?.optJSONArray("bundles")
+            val timings = json.optJSONObject("timings")
+            buildString {
+                if (statusCode != null) {
+                    appendLine("HTTP $statusCode")
+                }
+                appendLine("status = ${json.optString("status").ifBlank { "unknown" }}")
+                result?.opt("epoch")?.let { appendLine("epoch = $it") }
+                result?.opt("candidate_count")?.let { appendLine("candidate_count = $it") }
+                result?.opt("exact_match_count")?.let { appendLine("exact_match_count = $it") }
+                appendLine("bundle_count = ${bundles?.length() ?: 0}")
+                if (timings != null && timings.length() > 0) {
+                    appendLine("timings = ${timings}")
+                }
+                if (bundles != null && bundles.length() > 0) {
+                    appendLine()
+                    appendLine("Returned Bundles")
+                    for (index in 0 until bundles.length()) {
+                        val bundle = bundles.optJSONObject(index) ?: continue
+                        appendLine("- ${bundle.optString("bundle_label").ifBlank { "bundle_${index + 1}" }}")
+                    }
+                }
+            }.trimEnd()
+        } catch (_: Exception) {
+            if (statusCode != null) formatHttpResponse(statusCode, body) else body
+        }
+    }
+
     private fun buildQueryRequestArchive(
         authTokenBytes: ByteArray,
         shortlistTrapdoorBytes: ByteArray,
@@ -1461,7 +1564,13 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         writeTarEntry(tarBytes, "auth_token.txt", authTokenBytes)
         writeTarEntry(tarBytes, "shortlist_trapdoor.bin", shortlistTrapdoorBytes)
         writeTarEntry(tarBytes, "gid.txt", gid.toByteArray(Charsets.UTF_8))
-        writeTarEntry(tarBytes, "preferred_label.txt", preferredLabel.toByteArray(Charsets.UTF_8))
+        if (preferredLabel.isNotBlank()) {
+            writeTarEntry(
+                tarBytes,
+                "preferred_label_token.txt",
+                sha256Hex(preferredLabel).toByteArray(Charsets.UTF_8)
+            )
+        }
         if (proverStateBytes != null && proverStateBytes.isNotEmpty()) {
             writeTarEntry(tarBytes, "prover_state.json", proverStateBytes)
         }
@@ -1630,11 +1739,19 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
                 val ciphertext = decodeBase64(json.getString("ciphertext_base64"))
                 val authTag = decodeBase64(json.getString("auth_tag_base64"))
                 val plaintext = decryptChacha20Poly1305(sessionKey, nonce, ciphertext, authTag)
+                val filePayload = parseDecryptedFilePayload(plaintext)
                 buildString {
                     appendLine("status = ok")
                     appendLine("bundle_label = ${json.optString("bundle_label")}")
                     appendLine("matched_keywords = ${json.optJSONArray("matched_keywords") ?: JSONArray()}")
-                    append("plaintext = $plaintext")
+                    if (filePayload != null) {
+                        appendLine("file_name = ${filePayload.fileName}")
+                        appendLine("mime_type = ${filePayload.mimeType}")
+                        appendLine("file_bytes = ${filePayload.bytes.size}")
+                        append("file_status = ready to save from the app")
+                    } else {
+                        append("plaintext = $plaintext")
+                    }
                 }
             }
         } catch (_: Exception) {
@@ -1642,7 +1759,148 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         }
     }
 
+    private fun loadSelectedPlaintextFile(uri: Uri) {
+        setLoading(true)
+        ioExecutor.execute {
+            try {
+                val fileBytes = contentResolver.openInputStream(uri)?.use(InputStream::readBytes)
+                    ?: throw IOException("Unable to open the selected file")
+                if (fileBytes.size > MAX_IMPORTED_FILE_BYTES) {
+                    throw IllegalStateException(
+                        "Selected file is too large (${fileBytes.size} bytes, limit $MAX_IMPORTED_FILE_BYTES bytes)"
+                    )
+                }
+                val fileName = queryDisplayName(uri)
+                val mimeType = contentResolver.getType(uri).orEmpty().ifBlank { guessMimeType(fileName) }
+                val plaintext = decodeUtf8IfTextLike(fileBytes, mimeType, fileName)
+                runOnUiThread {
+                    suppressPlaintextWatcher = true
+                    if (plaintext != null) {
+                        selectedFileEnvelopeJson = null
+                        plaintextInput.setText(plaintext)
+                    } else {
+                        selectedFileEnvelopeJson = buildFileEnvelopeJson(fileName, mimeType, fileBytes)
+                        plaintextInput.setText(
+                            buildString {
+                                appendLine("Loaded binary file for encryption")
+                                appendLine("File: ${fileName ?: "selected file"}")
+                                appendLine("MIME: $mimeType")
+                                appendLine("Bytes: ${fileBytes.size}")
+                                append("This file will be encrypted as a binary payload.")
+                            }
+                        )
+                    }
+                    suppressPlaintextWatcher = false
+                    if (bundleLabelInput.text?.toString()?.trim().orEmpty().isBlank() && !fileName.isNullOrBlank()) {
+                        bundleLabelInput.setText(defaultBundleLabelForFile(fileName))
+                    }
+                    showStatusResult(
+                        "Load File For Encryption",
+                        buildString {
+                            appendLine("Loaded file: ${fileName ?: "selected text file"}")
+                            appendLine("Bytes: ${fileBytes.size}")
+                            append(
+                                if (plaintext != null) {
+                                    "Plaintext field updated from the selected text file."
+                                } else {
+                                    "Binary file envelope prepared for encryption."
+                                }
+                            )
+                        }
+                    )
+                    setLoading(false)
+                }
+            } catch (exc: Exception) {
+                runOnUiThread {
+                    showStatusError("Load File For Encryption", exc)
+                    setLoading(false)
+                }
+            }
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) {
+                    return cursor.getString(index)
+                }
+            }
+        }
+        return uri.lastPathSegment?.substringAfterLast('/')
+    }
+
+    private fun defaultBundleLabelForFile(fileName: String): String {
+        val trimmed = fileName.substringBeforeLast('.', fileName).trim()
+        return trimmed.ifBlank { fileName.trim() }
+    }
+
+    private fun buildFileEnvelopeJson(fileName: String?, mimeType: String, bytes: ByteArray): String {
+        return JSONObject().apply {
+            put("kind", FILE_ENVELOPE_KIND)
+            put("file_name", fileName ?: "encrypted_file")
+            put("mime_type", mimeType)
+            put("bytes_base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
+        }.toString()
+    }
+
+    private fun decodeUtf8IfTextLike(bytes: ByteArray, mimeType: String, fileName: String?): String? {
+        if (!isProbablyTextFile(mimeType, fileName)) {
+            return null
+        }
+        return runCatching { bytes.toString(Charsets.UTF_8) }
+            .getOrNull()
+            ?.takeIf { !it.contains('\u0000') }
+    }
+
+    private fun isProbablyTextFile(mimeType: String, fileName: String?): Boolean {
+        if (mimeType.startsWith("text/")) {
+            return true
+        }
+        val lowerName = fileName?.lowercase().orEmpty()
+        return lowerName.endsWith(".txt") ||
+            lowerName.endsWith(".json") ||
+            lowerName.endsWith(".csv") ||
+            lowerName.endsWith(".md") ||
+            lowerName.endsWith(".xml") ||
+            lowerName.endsWith(".yaml") ||
+            lowerName.endsWith(".yml") ||
+            lowerName.endsWith(".log")
+    }
+
+    private fun guessMimeType(fileName: String?): String {
+        val lowerName = fileName?.lowercase().orEmpty()
+        return when {
+            lowerName.endsWith(".pdf") -> "application/pdf"
+            lowerName.endsWith(".json") -> "application/json"
+            lowerName.endsWith(".csv") -> "text/csv"
+            lowerName.endsWith(".md") -> "text/markdown"
+            lowerName.endsWith(".txt") -> "text/plain"
+            else -> "application/octet-stream"
+        }
+    }
+
     private fun buildDecryptResultsOutput(results: List<Pair<ReturnedBundle, String>>): String {
+        latestDecryptedFilePayload = results.asSequence()
+            .mapNotNull { (_, nativeResult) ->
+                runCatching {
+                    val json = JSONObject(nativeResult)
+                    if (json.optString("status") != "ok") {
+                        null
+                    } else {
+                        val plaintext = decryptChacha20Poly1305(
+                            decodeBase64(json.getString("session_key_base64")),
+                            decodeBase64(json.getString("nonce_base64")),
+                            decodeBase64(json.getString("ciphertext_base64")),
+                            decodeBase64(json.getString("auth_tag_base64"))
+                        )
+                        parseDecryptedFilePayload(plaintext)
+                    }
+                }.getOrNull()
+            }
+            .firstOrNull()
+        saveDecryptedFileButton.isEnabled = latestDecryptedFilePayload != null
         val successes = results.filter { (_, nativeResult) ->
             runCatching { JSONObject(nativeResult).optString("status") == "ok" }.getOrDefault(false)
         }
@@ -1672,6 +1930,53 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
                 }
             }
         }.trimEnd()
+    }
+
+    private fun parseDecryptedFilePayload(plaintext: String): DecryptedFilePayload? {
+        return runCatching {
+            val json = JSONObject(plaintext)
+            if (json.optString("kind") != FILE_ENVELOPE_KIND) {
+                return null
+            }
+            val fileName = json.optString("file_name").ifBlank { "decrypted_file" }
+            val mimeType = json.optString("mime_type").ifBlank { "application/octet-stream" }
+            val bytesBase64 = json.optString("bytes_base64")
+            if (bytesBase64.isBlank()) {
+                return null
+            }
+            DecryptedFilePayload(fileName, mimeType, decodeBase64(bytesBase64))
+        }.getOrNull()
+    }
+
+    private fun saveLatestDecryptedFile(uri: Uri) {
+        val payload = latestDecryptedFilePayload ?: run {
+            showToast("Decrypt a file bundle first")
+            return
+        }
+        setLoading(true)
+        ioExecutor.execute {
+            try {
+                contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(payload.bytes)
+                } ?: throw IOException("Unable to open destination file")
+                runOnUiThread {
+                    showStatusResult(
+                        "Save Decrypted File",
+                        buildString {
+                            appendLine("Saved file: ${payload.fileName}")
+                            appendLine("MIME: ${payload.mimeType}")
+                            append("Bytes written: ${payload.bytes.size}")
+                        }
+                    )
+                    setLoading(false)
+                }
+            } catch (exc: Exception) {
+                runOnUiThread {
+                    showStatusError("Save Decrypted File", exc)
+                    setLoading(false)
+                }
+            }
+        }
     }
 
     private fun decryptChacha20Poly1305(
@@ -1754,6 +2059,46 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         }
     }
 
+    private fun showStatusResult(title: String, body: String) {
+        outputText.text = buildStatusOutput(title, body)
+        showStatusDialog(title, body)
+    }
+
+    private fun showStatusError(title: String, error: Throwable) {
+        val message = error.message ?: error.toString()
+        val body = "Error: $message"
+        outputText.text = buildStatusOutput(title, body)
+        showStatusDialog(title, body)
+    }
+
+    private fun buildStatusOutput(title: String, body: String): String {
+        return buildString {
+            append(title)
+            append('\n')
+            append(body)
+            append('\n')
+            append('\n')
+            append("(Also shown in popup)")
+        }
+    }
+
+    private fun showStatusDialog(title: String, body: String) {
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        val messageView = TextView(this).apply {
+            text = body
+            setTextIsSelectable(true)
+            setPadding(padding, padding, padding, padding)
+        }
+        val scrollView = ScrollView(this).apply {
+            addView(messageView)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scrollView)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
     private fun showToast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
@@ -1788,12 +2133,19 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         private const val DEFAULT_EDGE_URL = "http://10.0.2.2:8082"
         private const val DEFAULT_CS_URL = "http://10.0.2.2:8083"
         private const val NETWORK_TIMEOUT_MS = 900_000
+        private const val MAX_IMPORTED_FILE_BYTES = 5 * 1_048_576
+        private const val FILE_ENVELOPE_KIND = "pqabse_file_v1"
         private const val DEFAULT_BENCHMARK_PLAINTEXT = "mobile benchmark payload"
         private const val DEFAULT_BENCHMARK_POLICY_EXPRESSION = "AND(ai)"
         private const val MOBILE_BENCHMARK_REPEATS = 5
         private val MOBILE_BENCHMARK_KEYWORD_COUNTS = listOf(10, 50, 300, 500)
         private const val MOBILE_BENCHMARK_RUNS_FILE = "mobile_benchmark_runs.csv"
         private const val MOBILE_BENCHMARK_AVERAGES_FILE = "mobile_benchmark_results.csv"
+    }
+
+    private fun sha256Hex(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 }
 
