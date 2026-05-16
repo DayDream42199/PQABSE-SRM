@@ -1211,8 +1211,8 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         generatedPublicFileBase64 = prefs.getString(KEY_PUBLIC_FILE, "")?.trim().orEmpty().ifBlank { null }
         generatedVerificationKeyBase64 = prefs.getString(KEY_VERIFICATION_KEY, "")?.trim().orEmpty().ifBlank { null }
         generatedRequestArchiveBase64 = prefs.getString(KEY_REQUEST_ARCHIVE, "")?.trim().orEmpty().ifBlank { null }
-        lastUserKeyBase64 = prefs.getString(KEY_USER_KEY, "")?.trim().orEmpty().ifBlank { null }
-        lastPhase1ParamsBase64 = prefs.getString(KEY_PHASE1_PARAMS, "")?.trim().orEmpty().ifBlank { null }
+        lastUserKeyBase64 = readCachedGlobalMaterial(KEY_USER_KEY)
+        lastPhase1ParamsBase64 = readCachedGlobalMaterial(KEY_PHASE1_PARAMS)
         refreshGeneratedSecretPreviews()
     }
 
@@ -1240,8 +1240,8 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
             .putString(KEY_PUBLIC_FILE, generatedPublicFileBase64.orEmpty())
             .putString(KEY_VERIFICATION_KEY, generatedVerificationKeyBase64.orEmpty())
             .putString(KEY_REQUEST_ARCHIVE, generatedRequestArchiveBase64.orEmpty())
-            .putString(KEY_USER_KEY, lastUserKeyBase64.orEmpty())
-            .putString(KEY_PHASE1_PARAMS, lastPhase1ParamsBase64.orEmpty())
+            .remove(KEY_USER_KEY)
+            .remove(KEY_PHASE1_PARAMS)
             .apply()
     }
 
@@ -1254,10 +1254,13 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
                     if (label == "Register User" || label == "Refresh Current User") {
                         lastRegisterResponseBody = extractResponseBody(responseText)
                         cacheRegisterArtifacts(lastRegisterResponseBody)
+                        showStatusResult(label, buildRegisterOutput(label, lastRegisterResponseBody))
                     } else if (label == "Submit Query") {
                         lastQueryResponseBody = extractResponseBody(responseText)
+                        showStatusResult(label, responseText)
+                    } else {
+                        showStatusResult(label, responseText)
                     }
-                    showStatusResult(label, responseText)
                     setLoading(false)
                 }
             } catch (exc: Exception) {
@@ -1440,12 +1443,11 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
             val cachedUserKey = userJson?.optString("user_key_base64").orEmpty().ifBlank { null }
             lastUserKeyBase64 = cachedUserKey
             if (cachedGid.isNotBlank() && cachedUserKey != null) {
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .putString(userKeyStorageKey(cachedGid), cachedUserKey)
-                    .apply()
+                writeCachedMaterial(userKeyStorageKey(cachedGid), cachedUserKey)
             }
             lastPhase1ParamsBase64 = json.optString("phase1_params_base64").orEmpty().ifBlank { lastPhase1ParamsBase64 }
+            lastUserKeyBase64?.let { writeCachedGlobalMaterial(KEY_USER_KEY, it) }
+            lastPhase1ParamsBase64?.let { writeCachedGlobalMaterial(KEY_PHASE1_PARAMS, it) }
             saveConfig()
         } catch (_: Exception) {
             // Keep the last successful cached values if this response is not parseable JSON.
@@ -1457,12 +1459,39 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
     private fun resolveCachedUserKey(gid: String): String? {
         val trimmed = gid.trim()
         if (trimmed.isBlank()) return null
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        val cached = prefs.getString(userKeyStorageKey(trimmed), "")?.trim().orEmpty().ifBlank { null }
+        val cached = readCachedMaterial(userKeyStorageKey(trimmed))
         if (cached != null) return cached
         val currentGid = gidInput.text?.toString()?.trim().orEmpty()
         return if (trimmed == currentGid) lastUserKeyBase64 else null
     }
+
+    private fun keyMaterialDirectory(): File {
+        return File(filesDir, "key_material").apply { mkdirs() }
+    }
+
+    private fun materialFileName(name: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(name.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return "$digest.b64"
+    }
+
+    private fun cachedMaterialFile(name: String): File = File(keyMaterialDirectory(), materialFileName(name))
+
+    private fun writeCachedMaterial(name: String, value: String) {
+        cachedMaterialFile(name).writeText(value, Charsets.UTF_8)
+    }
+
+    private fun readCachedMaterial(name: String): String? {
+        val file = cachedMaterialFile(name)
+        return if (file.exists()) file.readText(Charsets.UTF_8).trim().ifBlank { null } else null
+    }
+
+    private fun writeCachedGlobalMaterial(name: String, value: String) {
+        writeCachedMaterial("global_$name", value)
+    }
+
+    private fun readCachedGlobalMaterial(name: String): String? = readCachedMaterial("global_$name")
 
     private data class ReturnedBundle(
         val label: String,
@@ -2027,6 +2056,34 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         }
     }
 
+    private fun buildRegisterOutput(title: String, responseBody: String?): String {
+        val body = responseBody.orEmpty()
+        return try {
+            val json = JSONObject(body)
+            val userJson = json.optJSONObject("user")
+            buildString {
+                appendLine("HTTP registration completed")
+                appendLine("status = ${json.optString("status", "unknown")}")
+                appendLine("gid = ${userJson?.optString("gid").orEmpty()}")
+                appendLine("attributes = ${userJson?.optJSONArray("attributes")?.length() ?: 0}")
+                appendLine("local_epoch = ${userJson?.optString("local_epoch").orEmpty()}")
+                appendLine("user_key_base64 = ${userJson?.optString("user_key_base64").orEmpty().let(::summarizeSecret)}")
+                appendLine("phase1_params_base64 = ${json.optString("phase1_params_base64").orEmpty().let(::summarizeSecret)}")
+                appendLine("key_cache = app private storage")
+                appendLine()
+                append("Use Returned Key to inspect the cached key summary.")
+            }.trimEnd()
+        } catch (_: Exception) {
+            buildString {
+                appendLine(title)
+                append(body.take(MAX_STATUS_BODY_CHARS))
+                if (body.length > MAX_STATUS_BODY_CHARS) {
+                    append("\n...truncated ${body.length - MAX_STATUS_BODY_CHARS} chars")
+                }
+            }
+        }
+    }
+
     private fun collectInterestingFields(prefix: String, value: Any?, results: MutableList<String>) {
         when (value) {
             is JSONObject -> {
@@ -2072,10 +2129,14 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
     }
 
     private fun buildStatusOutput(title: String, body: String): String {
+        val renderedBody = body.take(MAX_STATUS_BODY_CHARS)
         return buildString {
             append(title)
             append('\n')
-            append(body)
+            append(renderedBody)
+            if (body.length > MAX_STATUS_BODY_CHARS) {
+                append("\n...truncated ${body.length - MAX_STATUS_BODY_CHARS} chars")
+            }
             append('\n')
             append('\n')
             append("(Also shown in popup)")
@@ -2085,7 +2146,13 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
     private fun showStatusDialog(title: String, body: String) {
         val padding = (16 * resources.displayMetrics.density).toInt()
         val messageView = TextView(this).apply {
-            text = body
+            text = body.take(MAX_STATUS_BODY_CHARS).let {
+                if (body.length > MAX_STATUS_BODY_CHARS) {
+                    "$it\n...truncated ${body.length - MAX_STATUS_BODY_CHARS} chars"
+                } else {
+                    it
+                }
+            }
             setTextIsSelectable(true)
             setPadding(padding, padding, padding, padding)
         }
@@ -2134,6 +2201,7 @@ private fun JSONObject.optDoubleOrNull(key: String): Double? {
         private const val DEFAULT_CS_URL = "http://10.0.2.2:8083"
         private const val NETWORK_TIMEOUT_MS = 900_000
         private const val MAX_IMPORTED_FILE_BYTES = 5 * 1_048_576
+        private const val MAX_STATUS_BODY_CHARS = 24_000
         private const val FILE_ENVELOPE_KIND = "pqabse_file_v1"
         private const val DEFAULT_BENCHMARK_PLAINTEXT = "mobile benchmark payload"
         private const val DEFAULT_BENCHMARK_POLICY_EXPRESSION = "AND(ai)"
