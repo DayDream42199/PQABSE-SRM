@@ -196,6 +196,7 @@ echo '/usr/local/lib' | sudo tee /etc/ld.so.conf.d/openfhe.conf
 echo '/usr/local/lib64' | sudo tee /etc/ld.so.conf.d/liboqs.conf
 sudo ldconfig
 ./build-wsl/phase1_setup
+cd ..
 bash ./ta_ia_blockchain.sh serve-http 0.0.0.0 8081
 ```
 
