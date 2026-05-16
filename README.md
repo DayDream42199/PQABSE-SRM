@@ -249,7 +249,18 @@ PQ_ABSE_TA_URL="http://<Your_TA_instance_publicIP>:8081" bash ./cs.sh serve-http
 ---
 
 ## 3. Setting up the Mobile Client
-…
+```bash
+cd ~
+sudo apt update
+sudo apt install -y git git-lfs
+git lfs install
+git clone https://github.com/DayDream42199/PQABSE-SRM.git
+cd PQABSE-SRM
+git lfs pull
+
+ls -lh PQABSESRMMobileHTTP/app/src/main/native-prebuilt/x86_64/lib/liboqs.a
+ls -lh PQABSESRMMobileHTTP/app/src/main/native-prebuilt/arm64-v8a/lib/liboqs.a
+```
 
 ---
 
