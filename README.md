@@ -257,9 +257,6 @@ git lfs install
 git clone https://github.com/DayDream42199/PQABSE-SRM.git
 cd PQABSE-SRM
 git lfs pull
-
-ls -lh PQABSESRMMobileHTTP/app/src/main/native-prebuilt/x86_64/lib/liboqs.a
-ls -lh PQABSESRMMobileHTTP/app/src/main/native-prebuilt/arm64-v8a/lib/liboqs.a
 ```
 
 ---
