@@ -103,7 +103,9 @@ source ~/.bashrc
 # 3. Install Modern Rust-based Circom
 if ! command -v circom >/dev/null 2>&1 || ! circom --version | grep -q "2."; then
   sudo npm uninstall -g circom 2>/dev/null
-  wget [https://github.com/iden3/circom/releases/latest/download/circom-linux-amd64](https://github.com/iden3/circom/releases/latest/download/circom-linux-amd64) -O circom
+
+  wget https://github.com/iden3/circom/releases/latest/download/circom-linux-amd64 -O circom
+
   chmod +x circom
   sudo mv circom /usr/local/bin/circom
 fi
@@ -114,25 +116,53 @@ mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
 # 5. Build and Install LibOQS
-if [ ! -f /usr/local/lib64/cmake/liboqs/liboqsConfig.cmake ] && [ ! -f /usr/local/lib/cmake/liboqs/liboqsConfig.cmake ]; then
+if [ ! -f /usr/local/lib64/cmake/liboqs/liboqsConfig.cmake ] && \
+   [ ! -f /usr/local/lib/cmake/liboqs/liboqsConfig.cmake ]; then
+
   rm -rf liboqs
-  git clone --depth 1 [https://github.com/open-quantum-safe/liboqs.git](https://github.com/open-quantum-safe/liboqs.git)
+
+  git clone --depth 1 https://github.com/open-quantum-safe/liboqs.git
+
   cd liboqs
-  cmake -S . -B build -DBUILD_SHARED_LIBS=ON -DOQS_BUILD_ONLY_LIB=ON
+
+  cmake -S . -B build \
+    -DBUILD_SHARED_LIBS=ON \
+    -DOQS_BUILD_ONLY_LIB=ON
+
   cmake --build build -j2
+
   sudo cmake --install build
   sudo ldconfig
+
   cd ..
 fi
 
 # 6. Build and Install OpenFHE
 if [ ! -d /usr/local/include/openfhe ]; then
-  git clone --branch v1.2.2 --depth 1 [https://github.com/openfheorg/openfhe-development.git](https://github.com/openfheorg/openfhe-development.git)
+
+  rm -rf openfhe-development
+
+  git clone \
+    --branch v1.2.2 \
+    --depth 1 \
+    https://github.com/openfheorg/openfhe-development.git
+
   cd openfhe-development
-  cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_SHARED=ON -DBUILD_UNITTESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF
+
+  cmake -S . -B build \
+    -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DBUILD_SHARED=ON \
+    -DBUILD_UNITTESTS=OFF \
+    -DBUILD_EXAMPLES=OFF \
+    -DBUILD_BENCHMARKS=OFF
+
   cmake --build build -j2
+
   sudo cmake --install build
   sudo ldconfig
+
   cd ..
 fi
 ```
