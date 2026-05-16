@@ -249,6 +249,21 @@ PQ_ABSE_TA_URL="http://<Your_TA_instance_publicIP>:8081" bash ./cs.sh serve-http
 ---
 
 ## 3. Setting up the Mobile Client
+
+This section explains how to prepare the Android demo app for the mobile Android emulator. Keep the complete repository and native helper scripts inside WSL Ubuntu, then copy only the Android application folder (`PQABSESRMMobileHTTP`) into Windows and open that copied folder with Android Studio. This avoids Gradle, CMake, and emulator stability issues that can occur when Android Studio opens a WSL path directly.
+
+### 3.1 Prerequisites
+
+Install and configure the following before starting:
+
+1. **Android Studio** on Windows
+2. **WSL with Ubuntu**
+3. **Git LFS** inside WSL
+
+### 3.2 Repository Setup in WSL Ubuntu
+
+Run the repository setup commands inside your WSL Ubuntu terminal:
+
 ```bash
 cd ~
 sudo apt update
@@ -258,6 +273,147 @@ git clone https://github.com/DayDream42199/PQABSE-SRM.git
 cd PQABSE-SRM
 git lfs pull
 ```
+
+### 3.3 Copy the Android App Folder into Windows
+
+After the repository has been cloned in WSL, copy only the Android app folder into a normal Windows path. Run this in Windows PowerShell:
+
+```powershell
+Copy-Item "\\wsl.localhost\Ubuntu-24.04\home\<your-wsl-user>\PQABSE-SRM\PQABSESRMMobileHTTP" `
+  "C:\Users\<your-windows-user>\Desktop\PQABSESRMMobileHTTP" `
+  -Recurse -Force
+```
+
+If your WSL distribution is named `Ubuntu` instead of `Ubuntu-24.04`, adjust the source path accordingly.
+
+Warning: Do not open the WSL path directly in Android Studio. Open the copied Windows folder instead:
+
+```text
+C:\Users\<your-windows-user>\Desktop\PQABSESRMMobileHTTP
+```
+
+Prebuilt native libraries are already included at:
+
+```text
+PQABSESRMMobileHTTP/app/src/main/native-prebuilt
+```
+
+### 3.4 Android Studio Configuration
+
+Open Android Studio, go to **More Actions > SDK Manager**, and verify that these components are installed:
+
+1. Android SDK Platform for the app compile SDK
+2. Android SDK Build-Tools
+3. Android SDK Platform-Tools
+4. Android SDK Command-line Tools
+5. NDK (Side by side)
+6. CMake
+7. Android Emulator
+
+Then configure the Gradle JDK:
+
+1. Open **File > Settings > Build, Execution, Deployment > Build Tools > Gradle**.
+2. Set **Gradle JDK** to version `21`.
+3. Select **JetBrains** as the vendor if Android Studio shows that option.
+
+This helps prevent Gradle toolchain download failures on Windows.
+
+### 3.5 Emulator Setup
+
+In Android Studio:
+
+1. Open **Device Manager**.
+2. Click **Create a virtual device**.
+3. Select a recent Pixel device profile, such as **Pixel 7**.
+4. Install a recent Android system image.
+5. Click **Finish** and boot the emulator once to initialize it.
+
+### 3.6 Build and Install the App
+
+Open the copied Windows app folder in Android Studio:
+
+```text
+C:\Users\<your-windows-user>\Desktop\PQABSESRMMobileHTTP
+```
+
+Wait for the initial Gradle sync to finish. To verify the build and install from the command line, use Android Studio's bundled JDK in Windows PowerShell.
+
+Build the debug APK:
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
+cd "C:\Users\<your-windows-user>\Desktop\PQABSESRMMobileHTTP"
+
+.\gradlew.bat :app:assembleDebug
+```
+
+Install the debug APK on the running emulator:
+
+```powershell
+.\gradlew.bat :app:installDebug
+```
+
+### 3.7 Cloud Service Integration
+
+Once the app is running, configure the cloud endpoints inside the app settings. These must point to the public IP addresses of your EC2 instances.
+
+| Service Node | App Setting Key | Configuration Format |
+| :--- | :--- | :--- |
+| TA Node | TA URL | `http://<TA_IP>:8081` |
+| Edge Node | Edge URL | `http://<EDGE_IP>:8082` |
+| Cloud Server | CS URL | `http://<CS_IP>:8083` |
+
+Warning: Do not use `127.0.0.1` or private `172.x.x.x` addresses if the services are hosted on EC2 and the emulator is running locally.
+
+### 3.8 First Validation Flow
+
+After setup, verify the Android demo app with this sequence:
+
+1. Boot the emulator and open the installed debug app.
+2. Enter your cloud TA, Edge, and CS URLs in the configuration menu.
+3. Register or refresh a test user.
+4. Encrypt a test file.
+5. Generate query artifacts.
+6. Submit the query.
+7. Decrypt the result.
+
+If this flow completes successfully, the Android demo application is fully configured and ready to use.
+
+### 3.9 Troubleshooting
+
+**Gradle JDK or zip timestamp errors**
+
+If Gradle fails because of a JDK download issue or invalid zip timestamp, force PowerShell to use Android Studio's bundled JDK:
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
+.\gradlew.bat :app:installDebug
+```
+
+**ADB not recognized**
+
+If `adb` commands fail, use the absolute path to the executable:
+
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" devices
+```
+
+**Emulator shows old app behavior or UI**
+
+Perform a clean uninstall and reinstall:
+
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" uninstall com.example.pqabse_srmmobilehttp
+.\gradlew.bat :app:installDebug
+```
+
+**Cloud connection issues**
+
+If the app reaches Edge directly but encryption fails, the follow-up Cloud Server import may have failed rather than the Edge encryption itself. Check the CS `/health` endpoint, review `cs_http.log`, verify executable permissions on `cs.sh`, and confirm the Cloud endpoint URL inside the app.
+
+If cloud endpoints work in the terminal but not in the app, double-check that the Android app is configured with public EC2 IP addresses instead of local or private IPs.
 
 ---
 
