@@ -196,7 +196,8 @@ bash ./ta_ia_blockchain.sh serve-http 0.0.0.0 8081
 Download the Edge-specific code:
 ```bash
 cd ~
-git clone --no-checkout --sparse --filter=blob:none [https://github.com/DayDream42199/PQABSE-SRM.git](https://github.com/DayDream42199/PQABSE-SRM.git)
+git clone --no-checkout --sparse --filter=blob:none \
+  https://github.com/DayDream42199/PQABSE-SRM.git
 cd PQABSE-SRM
 git sparse-checkout set "RunFullSys/Edge node/"
 git checkout main
@@ -217,9 +218,10 @@ PQ_ABSE_TA_URL="http://<Your_TA_instance_publicIP>:8081" bash ./edge_node.sh ser
 Download the CS-specific code:
 ```bash
 cd ~
-git clone --no-checkout --sparse --filter=blob:none [https://github.com/DayDream42199/PQABSE-SRM.git](https://github.com/DayDream42199/PQABSE-SRM.git)
+git clone --no-checkout --sparse --filter=blob:none \
+  https://github.com/DayDream42199/PQABSE-SRM.git
 cd PQABSE-SRM
-git sparse-checkout set RunFullSys/CS
+git sparse-checkout set "RunFullSys/CS"
 git checkout main
 ```
 Build the C++ core and start the HTTP service (Replace <Your_TA_instance_publicIP> with your actual TA IP):
