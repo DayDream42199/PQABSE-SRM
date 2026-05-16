@@ -430,13 +430,13 @@ Expected Behavior & Status Codes
 **The Lockout (Revoked Users):** If a revoked user attempts to refresh their key, the TA node will permanently reject the request, and the 500 error will persist, proving the zero-knowledge lockout is functional.
 
 ### 4.1 Keygen
-…
+In the MDU Bootstrap tab, enter the user GID and attribute. Then press Register User.
 
 ### 4.2 Encrypt
-…
+In the MDO Encrypt tab, enter the bundle label and plaintext (file), keywords, and policy. Then, press Encrypt with Edge.
 
 ### 4.3 Search and Decrypt
-…
+In the MDU Query tab, enter the searcher GID (Which user are we) and keywords (min-match). Then, press generate query artifact, submits query to CS, and decrypt latest query result.
 
 ### 4.4 Revocation
 …
