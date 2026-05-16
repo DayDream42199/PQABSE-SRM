@@ -188,6 +188,9 @@ cmake ..
 cmake --build . -j2
 
 cd ..
+echo '/usr/local/lib' | sudo tee /etc/ld.so.conf.d/openfhe.conf
+echo '/usr/local/lib64' | sudo tee /etc/ld.so.conf.d/liboqs.conf
+sudo ldconfig
 ./build-wsl/phase1_setup
 bash ./ta_ia_blockchain.sh serve-http 0.0.0.0 8081
 ```
@@ -212,6 +215,9 @@ cmake ..
 cmake --build . -j2
 
 cd ../..
+echo '/usr/local/lib' | sudo tee /etc/ld.so.conf.d/openfhe.conf
+echo '/usr/local/lib64' | sudo tee /etc/ld.so.conf.d/liboqs.conf
+sudo ldconfig
 PQ_ABSE_TA_URL="http://<Your_TA_instance_publicIP>:8081" bash ./edge_node.sh serve-http 0.0.0.0 8082
 ```
 ### 4. Deploying the Cloud Server (CS) Instance
@@ -234,6 +240,9 @@ cmake ..
 cmake --build . -j2
 
 cd ../..
+echo '/usr/local/lib' | sudo tee /etc/ld.so.conf.d/openfhe.conf
+echo '/usr/local/lib64' | sudo tee /etc/ld.so.conf.d/liboqs.conf
+sudo ldconfig
 PQ_ABSE_TA_URL="http://<Your_TA_instance_publicIP>:8081" bash ./cs.sh serve-http 0.0.0.0 8083
 ```
 
