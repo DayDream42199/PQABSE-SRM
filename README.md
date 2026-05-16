@@ -1,6 +1,6 @@
 # ReadMe!!!
 ## Introduction
-This repository contains a demon of post-quantum attribute-based searchable encryption. It includes backend services for the Trusted Authority, Edge Node, and Cloud Server, plus an Android mobile client for testing encryption, query generation, search, decryption, and revocation workflows.
+This repository contains a demo of post-quantum attribute-based searchable encryption. It includes backend services for the Trusted Authority, Edge Node, and Cloud Server, plus an Android mobile client for testing encryption, query generation, search, decryption, and revocation workflows.
 
 The backend is intended to run on AWS EC2 instances, while the Android client is built locally with Android Studio on Windows using files prepared through WSL Ubuntu.
 
