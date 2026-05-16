@@ -3,7 +3,9 @@
 …
 
 ## Overall system
-…
+<p align="center">
+  <img src="MainStructure.png" width="700">
+</p>
 
 ---
 
