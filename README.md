@@ -450,3 +450,8 @@ In the MDU Query tab, enter the searcher GID (Which user are we) and keywords (m
 
 ### 4.4 Revocation
 In the Revocation and Refresh tab, enter the revoke target GID and press revoke target user. Then, when you wanted to search again using other GID (key of other user), you must enter that in refresh target GID, and press refresh current user.
+
+---
+
+## 5. Running the Experimentation
+...
