@@ -478,18 +478,6 @@ The cloud experiment outputs are CSV files:
 - averaged results: `cloud_benchmark_results.csv`
 - per-run results: `cloud_benchmark_runs.csv`
 
-#### Cloud Reference Experimentation
-
-There is no separate cloud command named `reference` or `--suite reference`. On the cloud side, the reference-paper comparison is represented by the reference-aligned benchmark families:
-
-| Reference-paper track | Cloud benchmark to run | Main output metric |
-| --- | --- | --- |
-| `ReferenceTestPaper1.txt` search / keyword-scaling | `--suite keyword` or `run_cloud_cs_search_experiments.py` | `candidate_generation_ms` |
-| `ReferenceTestPaper4.txt` encryption / scaling | `--suite keyword` or `run_cloud_edge_encrypt_experiments.py` | `encrypt_bundle_ms` |
-| `ReferenceTestPaper5.txt` revocation | `--suite revoke` or `run_cloud_ta_revoke_experiments.py` | `update_token_write_ms` |
-
-These are benchmark-compatible, reference-aligned cloud experiments, not exact line-by-line reproductions of the reference paper implementations. The exact mobile primitive reference baseline is the local Android `reference` mode in section 5.2.
-
 #### Step 1: Rebuild the Cloud Services
 
 Run these commands on the matching cloud instances before benchmarking, so the HTTP services include the timing fields used by the experiment scripts.
