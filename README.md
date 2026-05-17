@@ -454,20 +454,363 @@ In the Revocation and Refresh tab, enter the revoke target GID and press revoke 
 ---
 
 ## 5. Running the Experimentation
-The experimentation workflow is divided into two parts: cloud-side benchmarking and local Android/mobile benchmarking.
+The experimentation is divided into two parts:
+
+1. **Cloud experimentation** measures the deployed TA, Edge, and CS HTTP services.
+2. **Local mobile experimentation** measures Android/emulator-side mobile primitives and native fixture work.
+
+Run both parts if you want the complete experiment data. The cloud runners do not collect Android local timing, and the local mobile runner does not contact the cloud unless you explicitly run the normal app workflow.
 
 ### 5.1 Cloud Experimentation
 
-Cloud experiments measure the deployed TA, Edge, and CS services through the benchmark runners in the repository's benchmark folder. Use this path when the backend services are running on cloud instances and you want CSV outputs for the server-side experiment families.
+Cloud experimentation is stored in `benchmarks/`. It measures these experiment families:
 
-For setup steps, runner descriptions, command examples, and output CSV details, see:
+| Experiment family | Metric | Parameter sweep |
+| --- | --- | --- |
+| Edge bundle encryption | `encrypt_bundle_ms` | keyword counts `10, 50, 300, 500` |
+| CS search candidate generation | `candidate_generation_ms` | keyword counts `10, 50, 300, 500` |
+| TA trapdoor generation | `trapdoor_gen_ms` | keyword counts `10, 50, 300, 500` |
+| TA key generation | `keygen_ms` | attribute counts `10, 20, 30, 40, 50` |
+| TA revoke/update-token write | `update_token_write_ms` | user counts `10, 20, 30, 40, 50` |
 
-- [benchmarks/README.md](benchmarks/README.md)
+The cloud experiment outputs are CSV files:
+
+- averaged results: `cloud_benchmark_results.csv`
+- per-run results: `cloud_benchmark_runs.csv`
+
+#### Step 1: Rebuild the Cloud Services
+
+Run these commands on the matching cloud instances before benchmarking, so the HTTP services include the timing fields used by the experiment scripts.
+
+TA:
+
+```bash
+cd ~/PQABSE-SRM/RunFullSys/TA+IA+Blockchain/app/build-wsl
+cmake ..
+cmake --build . -j2
+```
+
+Edge:
+
+```bash
+cd ~/PQABSE-SRM/"RunFullSys/Edge node"/app/build-wsl
+cmake ..
+cmake --build . -j2
+```
+
+CS:
+
+```bash
+cd ~/PQABSE-SRM/RunFullSys/CS/app/build-wsl
+cmake ..
+cmake --build . -j2
+```
+
+#### Step 2: Restart the Cloud Services
+
+On the TA instance:
+
+```bash
+pkill -f "ta_ia_blockchain.sh serve-http"
+cd ~/PQABSE-SRM/RunFullSys/TA+IA+Blockchain
+nohup bash ./ta_ia_blockchain.sh serve-http 0.0.0.0 8081 > ta_http.log 2>&1 &
+```
+
+On the Edge instance:
+
+```bash
+pkill -f "edge_node.sh serve-http"
+cd ~/PQABSE-SRM/"RunFullSys/Edge node"
+nohup env PQ_ABSE_TA_URL="http://<TA_IP>:8081" bash ./edge_node.sh serve-http 0.0.0.0 8082 > edge_http.log 2>&1 &
+```
+
+On the CS instance:
+
+```bash
+pkill -f "cs.sh serve-http"
+cd ~/PQABSE-SRM/RunFullSys/CS
+nohup env PQ_ABSE_TA_URL="http://<TA_IP>:8081" bash ./cs.sh serve-http 0.0.0.0 8083 > cs_http.log 2>&1 &
+```
+
+Replace `<TA_IP>`, `<EDGE_IP>`, and `<CS_IP>` with the public IP addresses or reachable hostnames for your deployment.
+
+#### Step 3: Run the Cloud Benchmarks
+
+From a machine that can reach all three cloud services:
+
+```bash
+cd ~/PQABSE-SRM
+python3 benchmarks/run_cloud_server_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082 \
+  --cs-url http://<CS_IP>:8083
+```
+
+To run only one cloud suite:
+
+```bash
+python3 benchmarks/run_cloud_server_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082 \
+  --cs-url http://<CS_IP>:8083 \
+  --suite keyword
+```
+
+```bash
+python3 benchmarks/run_cloud_server_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082 \
+  --cs-url http://<CS_IP>:8083 \
+  --suite keygen
+```
+
+```bash
+python3 benchmarks/run_cloud_server_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082 \
+  --cs-url http://<CS_IP>:8083 \
+  --suite revoke
+```
+
+To change the repeat count, add `--repeats`, for example:
+
+```bash
+python3 benchmarks/run_cloud_server_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082 \
+  --cs-url http://<CS_IP>:8083 \
+  --repeats 3
+```
+
+#### Step 4: Run Dedicated Cloud Benchmarks, If Needed
+
+Use these scripts when you want one CSV family per experiment instead of one combined cloud run.
+
+CS search only:
+
+```bash
+python3 benchmarks/run_cloud_cs_search_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082 \
+  --cs-url http://<CS_IP>:8083
+```
+
+Edge encryption only:
+
+```bash
+python3 benchmarks/run_cloud_edge_encrypt_experiments.py \
+  --ta-url http://<TA_IP>:8081 \
+  --edge-url http://<EDGE_IP>:8082
+```
+
+TA key generation only:
+
+```bash
+python3 benchmarks/run_cloud_ta_keygen_experiments.py \
+  --ta-url http://<TA_IP>:8081
+```
+
+TA trapdoor generation only:
+
+```bash
+python3 benchmarks/run_cloud_ta_trapdoor_experiments.py \
+  --ta-url http://<TA_IP>:8081
+```
+
+TA revoke/update-token only:
+
+```bash
+python3 benchmarks/run_cloud_ta_revoke_experiments.py \
+  --ta-url http://<TA_IP>:8081
+```
 
 ### 5.2 Local Mobile Experimentation
 
-Local experiments measure Android/mobile-side behavior from the `PQABSESRMMobileHTTP` project. Use this path when running the Panda4 emulator and collecting mobile benchmark CSVs through the benchmark pack.
+Local mobile experimentation is stored in `PQABSESRMMobileHTTP/benchmark-pack/`. It runs Android instrumentation tests on the Panda4 emulator and writes CSV results under the app's external files directory.
 
-For Android Studio steps, PowerShell commands, benchmark modes, and result-pulling instructions, see:
+There are three mobile benchmark modes:
 
-- [PQABSESRMMobileHTTP/benchmark-pack/README.md](PQABSESRMMobileHTTP/benchmark-pack/README.md)
+| Mode | Output folder | What it measures |
+| --- | --- | --- |
+| `reference` | `reference_mobile_primitives` | reference-paper mobile baselines: ChaCha20-Poly1305 encryption, HMAC-SHA256 trapdoor generation, and ChaCha20-Poly1305 decryption |
+| `payload` | `payload_mobile_primitives` | lightweight payload encryption only: ChaCha20-Poly1305, excluding ABSE, secure-index construction, JNI native crypto, network, cloud, and Edge/TEE work |
+| `fixtures` | `native_fixture_primitives` | Android JNI native fixture work: local bundle construction, trapdoor generation, and optionally decryption when fixture files are available |
+
+The reference experiment is the `reference` mode. It produces:
+
+- `reference_mobile_primitives/reference_mobile_primitives_raw.csv`
+- `reference_mobile_primitives/reference_mobile_primitives_averages.csv`
+
+The reference CSV contains these primitive labels:
+
+- `reference_encrypt_chacha20_poly1305`
+- `reference_trapdoor_hmac_sha256`
+- `reference_decrypt_chacha20_poly1305`
+
+#### Step 1: Open the Android Project
+
+Copy/open the Android project in Windows, not directly from the WSL path:
+
+```text
+PQABSESRMMobileHTTP
+```
+
+In Android Studio Panda:
+
+1. Open `PQABSESRMMobileHTTP`.
+2. Start the Panda4 emulator.
+3. Make sure the emulator is visible to `adb`.
+
+From Windows PowerShell in the Android project root:
+
+```powershell
+cd C:\Users\User\AndroidStudioProjects\PQABSESRMMobileHTTP
+$adb="$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+$pkg="com.example.pqabse_srmmobilehttp"
+& $adb devices
+```
+
+#### Step 2: Build and Install the App/Test APK
+
+If you need native fixture mode, set the Android native prebuilt root before building:
+
+```powershell
+$env:ABSE_ANDROID_PREBUILT_ROOT="C:\Users\User\AndroidStudioProjects\abse-android-src\prebuilt"
+```
+
+Install the debug app and Android test APK:
+
+```powershell
+.\gradlew.bat :app:installDebug :app:installDebugAndroidTest
+```
+
+If native C++ or JNI code changed, run a clean build once:
+
+```powershell
+.\gradlew.bat clean :app:installDebug :app:installDebugAndroidTest
+```
+
+#### Step 3: Run the Reference Mobile Experiment
+
+This is the reference-paper mobile primitive experiment.
+
+```powershell
+.\benchmark-pack\run_mobile_benchmarks.ps1 `
+  -Mode reference `
+  -KeywordCounts 10,50,300,500 `
+  -Runs 30 `
+  -WarmupRuns 30 `
+  -PayloadBytes 4096
+```
+
+The helper script installs the app/test APK, runs instrumentation, and pulls CSV files into:
+
+```text
+PQABSESRMMobileHTTP\benchmark-pack\results
+```
+
+Read the reference averages:
+
+```powershell
+Get-Content benchmark-pack\results\reference_mobile_primitives\reference_mobile_primitives_averages.csv
+```
+
+You can also run the same reference experiment manually with `adb`:
+
+```powershell
+& $adb shell am instrument -w `
+  -e benchmarkMode reference `
+  -e keywordCounts 10,50,300,500 `
+  -e runs 30 `
+  -e warmupRuns 30 `
+  -e payloadBytes 4096 `
+  -e class com.example.pqabse_srmmobilehttp.MobileBenchmarkPackInstrumentedTest#runBenchmarkPack `
+  com.example.pqabse_srmmobilehttp.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+#### Step 4: Run the Payload-Only Mobile Encryption Experiment
+
+Use this mode for the paper-aligned lightweight mobile payload encryption number. It measures only ChaCha20-Poly1305 payload encryption, so the results should be nearly flat across keyword counts.
+
+```powershell
+.\benchmark-pack\run_mobile_benchmarks.ps1 `
+  -Mode payload `
+  -KeywordCounts 10,50,300,500 `
+  -Runs 30 `
+  -WarmupRuns 30 `
+  -PayloadBytes 4096
+```
+
+Read the payload averages:
+
+```powershell
+Get-Content benchmark-pack\results\payload_mobile_primitives\payload_mobile_primitives_averages.csv
+```
+
+#### Step 5: Run the Native Fixture Experiment
+
+Use this mode when you want Android-side native/JNI measurements without cloud HTTP calls.
+
+At minimum, fixture mode needs:
+
+```text
+PQABSESRMMobileHTTP\benchmark-pack\fixtures\phase1_params.txt
+```
+
+For trapdoor and decryption, also provide:
+
+```text
+PQABSESRMMobileHTTP\benchmark-pack\fixtures\user_key.bin
+PQABSESRMMobileHTTP\benchmark-pack\fixtures\bundles\keywords_0010_bundle.bin
+PQABSESRMMobileHTTP\benchmark-pack\fixtures\bundles\keywords_0050_bundle.bin
+PQABSESRMMobileHTTP\benchmark-pack\fixtures\bundles\keywords_0300_bundle.bin
+PQABSESRMMobileHTTP\benchmark-pack\fixtures\bundles\keywords_0500_bundle.bin
+```
+
+Generate matching mobile decrypt fixtures from WSL if needed:
+
+```powershell
+wsl.exe bash -lc "cd /home/<your-wsl-user>/PQABSE-SRM/PQABSESRMMobileHTTP && python3 benchmark-pack/generate_mobile_decrypt_fixtures.py"
+```
+
+Then run fixture mode without the slow decryption pass:
+
+```powershell
+.\benchmark-pack\run_mobile_benchmarks.ps1 `
+  -Mode fixtures `
+  -KeywordCounts 10,50,300,500 `
+  -Runs 5 `
+  -IncludeDecryption $false
+```
+
+Read the fixture averages:
+
+```powershell
+Get-Content benchmark-pack\results\native_fixture_primitives\native_fixture_primitives_averages.csv
+```
+
+#### Step 6: Check Mobile Output Locations
+
+On the emulator, benchmark output is written under:
+
+```text
+/sdcard/Android/data/com.example.pqabse_srmmobilehttp/files/benchmark-pack
+```
+
+After the helper script pulls results, local copies are under:
+
+```text
+PQABSESRMMobileHTTP\benchmark-pack\results
+```
+
+Expected mobile result files include:
+
+- `native_status.txt`
+- `payload_mobile_primitives/payload_mobile_primitives_raw.csv`
+- `payload_mobile_primitives/payload_mobile_primitives_averages.csv`
+- `reference_mobile_primitives/reference_mobile_primitives_raw.csv`
+- `reference_mobile_primitives/reference_mobile_primitives_averages.csv`
+- `native_fixture_primitives/native_fixture_primitives_raw.csv`
+- `native_fixture_primitives/native_fixture_primitives_averages.csv`
+
+Always pull fresh results after each benchmark run. Reading an old CSV from `benchmark-pack\results` is the easiest way to accidentally inspect stale data.
