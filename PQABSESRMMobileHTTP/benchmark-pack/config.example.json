@@ -1,0 +1,17 @@
+{
+  "benchmarkMode": "all",
+  "keywordCounts": [10, 50, 300, 500],
+  "runs": 5,
+  "payloadBytes": 4096,
+  "warmupRuns": 30,
+  "includeDecryption": false,
+  "outputSubdir": "benchmark-pack",
+  "fixtureFiles": [
+    "fixtures/phase1_params.txt",
+    "fixtures/user_key.bin",
+    "fixtures/bundles/keywords_0010_bundle.bin",
+    "fixtures/bundles/keywords_0050_bundle.bin",
+    "fixtures/bundles/keywords_0300_bundle.bin",
+    "fixtures/bundles/keywords_0500_bundle.bin"
+  ]
+}

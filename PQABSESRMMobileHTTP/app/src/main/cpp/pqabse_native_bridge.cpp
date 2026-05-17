@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,7 @@
 #include <openfhe/core/config_core.h>
 #include <openfhe/core/lattice/hal/lat-backend.h>
 #include <openfhe/core/lattice/trapdoor.h>
+#include <oqs/rand.h>
 #include <oqs/oqsconfig.h>
 #endif
 
@@ -409,6 +411,154 @@ std::vector<std::string> CanonicalizeStrings(const std::vector<std::string>& val
     return canonical;
 }
 
+bool FillRandomBytes(unsigned char* buffer, size_t size) {
+    OQS_randombytes(buffer, size);
+    return true;
+}
+
+std::vector<std::string> CollectLeafAttributes(const LogicalPolicy& policy) {
+    if (policy.kind == PolicyKind::Attribute) {
+        return {policy.attribute};
+    }
+
+    std::vector<std::string> leaves;
+    for (const auto& child : policy.children) {
+        const auto childLeaves = CollectLeafAttributes(child);
+        leaves.insert(leaves.end(), childLeaves.begin(), childLeaves.end());
+    }
+    return CanonicalizeStrings(leaves);
+}
+
+bool IsFlatLeafOnly(const LogicalPolicy& policy) {
+    if (policy.kind == PolicyKind::Attribute) {
+        return true;
+    }
+    return !policy.children.empty() &&
+           std::all_of(policy.children.begin(), policy.children.end(), [](const LogicalPolicy& child) {
+               return child.kind == PolicyKind::Attribute;
+           });
+}
+
+int64_t PowInt(int64_t base, size_t exponent) {
+    int64_t result = 1;
+    for (size_t i = 0; i < exponent; ++i) {
+        result *= base;
+    }
+    return result;
+}
+
+LogicalPolicy MakeAttributePolicy(const std::string& attribute) {
+    if (attribute.empty()) {
+        throw std::invalid_argument("attribute policy cannot be empty");
+    }
+    return LogicalPolicy{PolicyKind::Attribute, 1, attribute, {}};
+}
+
+LogicalPolicy MakeAndPolicy(const std::vector<std::string>& attributes) {
+    std::vector<LogicalPolicy> children;
+    for (const auto& attribute : CanonicalizeStrings(attributes)) {
+        children.push_back(MakeAttributePolicy(attribute));
+    }
+    if (children.empty()) {
+        throw std::invalid_argument("AND policy requires children");
+    }
+    return LogicalPolicy{PolicyKind::And, children.size(), "", children};
+}
+
+std::string DescribeLogicalPolicy(const LogicalPolicy& policy) {
+    if (policy.kind == PolicyKind::Attribute) {
+        return policy.attribute;
+    }
+
+    std::ostringstream out;
+    switch (policy.kind) {
+        case PolicyKind::And:
+            out << "AND(";
+            break;
+        case PolicyKind::Or:
+            out << "OR(";
+            break;
+        case PolicyKind::Threshold:
+            out << policy.threshold << "-of-" << policy.children.size() << "(";
+            break;
+        case PolicyKind::Attribute:
+            break;
+    }
+
+    for (size_t i = 0; i < policy.children.size(); ++i) {
+        if (i != 0) {
+            out << ", ";
+        }
+        out << DescribeLogicalPolicy(policy.children[i]);
+    }
+    out << ")";
+    return out.str();
+}
+
+AccessPolicy BuildAccessPolicy(const LogicalPolicy& logicalPolicy) {
+    AccessPolicy policy;
+    policy.descriptor = DescribeLogicalPolicy(logicalPolicy);
+    policy.rho = CollectLeafAttributes(logicalPolicy);
+    policy.is_summary = !IsFlatLeafOnly(logicalPolicy);
+
+    if (logicalPolicy.kind == PolicyKind::Attribute) {
+        policy.matrix = {{1}};
+        return policy;
+    }
+
+    if (!policy.is_summary) {
+        const size_t threshold =
+            logicalPolicy.kind == PolicyKind::Threshold
+                ? logicalPolicy.threshold
+                : (logicalPolicy.kind == PolicyKind::Or ? 1 : logicalPolicy.children.size());
+        for (size_t row = 0; row < logicalPolicy.children.size(); ++row) {
+            std::vector<int64_t> rowValues;
+            rowValues.reserve(threshold);
+            const int64_t x = static_cast<int64_t>(row + 1);
+            for (size_t col = 0; col < threshold; ++col) {
+                rowValues.push_back(PowInt(x, col));
+            }
+            policy.matrix.push_back(std::move(rowValues));
+        }
+        return policy;
+    }
+
+    policy.matrix.assign(policy.rho.size(), std::vector<int64_t>(policy.rho.size(), 0));
+    for (size_t i = 0; i < policy.rho.size(); ++i) {
+        policy.matrix[i][i] = 1;
+    }
+    return policy;
+}
+
+std::vector<unsigned char> BuildCiphertextBindingSeed(JNIEnv* env,
+                                                       const AccessPolicy& policy,
+                                                       const std::string& versionTag,
+                                                       const std::array<unsigned char, 16>& fileNonce,
+                                                       const std::string& reEncryptionMaterial) {
+    std::vector<unsigned char> seed;
+    seed.insert(seed.end(), policy.descriptor.begin(), policy.descriptor.end());
+    seed.push_back(0xFF);
+    for (const auto& attribute : policy.rho) {
+        seed.insert(seed.end(), attribute.begin(), attribute.end());
+        seed.push_back(0xFE);
+    }
+    seed.insert(seed.end(), {'V', 'E', 'R', 0});
+    seed.insert(seed.end(), versionTag.begin(), versionTag.end());
+    seed.push_back(0xFF);
+    seed.insert(seed.end(), {'N', 'O', 'N', 'C', 'E', 0});
+    seed.insert(seed.end(), fileNonce.begin(), fileNonce.end());
+    seed.push_back(0xFF);
+    if (!reEncryptionMaterial.empty()) {
+        const auto digest = Sha256(
+            env,
+            std::vector<unsigned char>(reEncryptionMaterial.begin(), reEncryptionMaterial.end()));
+        seed.insert(seed.end(), {'R', 'E', 'K', 'E', 'Y', 0});
+        seed.insert(seed.end(), digest.begin(), digest.end());
+        seed.push_back(0xFF);
+    }
+    return seed;
+}
+
 void MixHash(JNIEnv* env, const std::vector<unsigned char>& seed, uint32_t index, unsigned char digest[32]) {
     std::vector<unsigned char> input = seed;
     input.push_back(static_cast<unsigned char>((index >> 24) & 0xFF));
@@ -437,6 +587,28 @@ TrapdoorElement SampleUniformElement(JNIEnv* env,
     return element;
 }
 
+TrapdoorElement EncodeBoundAccessPolicy(JNIEnv* env,
+                                        const SystemParams& params,
+                                        const AccessPolicy& policy,
+                                        const std::string& versionTag,
+                                        const std::array<unsigned char, 16>& fileNonce,
+                                        const std::string& reEncryptionMaterial) {
+    auto seed = BuildCiphertextBindingSeed(env, policy, versionTag, fileNonce, reEncryptionMaterial);
+    seed.insert(seed.end(), policy.descriptor.begin(), policy.descriptor.end());
+    return SampleUniformElement(env, params, seed, 0);
+}
+
+TrapdoorElement EncodeEpochBinding(JNIEnv* env,
+                                   const SystemParams& params,
+                                   const AccessPolicy& policy,
+                                   const std::string& versionTag,
+                                   const std::array<unsigned char, 16>& fileNonce,
+                                   const std::string& reEncryptionMaterial) {
+    auto seed = BuildCiphertextBindingSeed(env, policy, versionTag, fileNonce, reEncryptionMaterial);
+    seed.insert(seed.end(), {'E', 'P', 'O', 'C', 'H', 0});
+    return SampleUniformElement(env, params, seed, params.ring_dim);
+}
+
 TrapdoorElement EncodeKeywordToken(JNIEnv* env,
                                    const SystemParams& params,
                                    const std::string& keyword,
@@ -449,6 +621,19 @@ TrapdoorElement EncodeKeywordToken(JNIEnv* env,
     };
     seed.insert(seed.end(), keyword.begin(), keyword.end());
     return SampleUniformElement(env, params, seed, 0);
+}
+
+std::vector<TrapdoorElement> BuildSecureIndex(JNIEnv* env,
+                                              const SystemParams& params,
+                                              const std::vector<std::string>& keywords,
+                                              const std::array<unsigned char, 16>& fileNonce) {
+    const auto canonicalKeywords = CanonicalizeStrings(keywords);
+    std::vector<TrapdoorElement> secureIndex;
+    secureIndex.reserve(canonicalKeywords.size());
+    for (const auto& keyword : canonicalKeywords) {
+        secureIndex.push_back(EncodeKeywordToken(env, params, keyword, fileNonce));
+    }
+    return secureIndex;
 }
 
 bool WriteStringBinary(std::ostream& out, const std::string& value) {
@@ -476,12 +661,13 @@ bool WriteElementBinary(std::ostream& out, const TrapdoorElement& source) {
     return true;
 }
 
-bool SerializeSearchTrapdoor(JNIEnv* env,
-                             const SystemParams& params,
-                             const UserSecretKey& userKey,
-                             const std::string& preferredLabel,
-                             const std::vector<std::string>& queryKeywords,
-                             std::vector<unsigned char>& output) {
+bool SerializeSearchTrapdoorWithNonce(JNIEnv* env,
+                                      const SystemParams& params,
+                                      const UserSecretKey& userKey,
+                                      const std::array<unsigned char, 16>& fileNonce,
+                                      const std::string& preferredLabel,
+                                      const std::vector<std::string>& queryKeywords,
+                                      std::vector<unsigned char>& output) {
     std::ostringstream out(std::ios::binary);
     const std::string magic = "PQABSE_TRAPDOOR_V1";
     if (!WriteStringBinary(out, magic) ||
@@ -497,10 +683,9 @@ bool SerializeSearchTrapdoor(JNIEnv* env,
         return false;
     }
 
-    std::array<unsigned char, 16> globalNonce{};
     for (const auto& keyword : canonicalKeywords) {
         if (!WriteStringBinary(out, keyword) ||
-            !WriteElementBinary(out, EncodeKeywordToken(env, params, keyword, globalNonce))) {
+            !WriteElementBinary(out, EncodeKeywordToken(env, params, keyword, fileNonce))) {
             return false;
         }
     }
@@ -518,6 +703,23 @@ bool SerializeSearchTrapdoor(JNIEnv* env,
     const std::string payload = out.str();
     output.assign(payload.begin(), payload.end());
     return true;
+}
+
+bool SerializeSearchTrapdoor(JNIEnv* env,
+                             const SystemParams& params,
+                             const UserSecretKey& userKey,
+                             const std::string& preferredLabel,
+                             const std::vector<std::string>& queryKeywords,
+                             std::vector<unsigned char>& output) {
+    std::array<unsigned char, 16> globalNonce{};
+    return SerializeSearchTrapdoorWithNonce(
+        env,
+        params,
+        userKey,
+        globalNonce,
+        preferredLabel,
+        queryKeywords,
+        output);
 }
 
 bool ParseParamsText(const std::vector<unsigned char>& paramsBytes, SystemParams& params) {
@@ -892,11 +1094,31 @@ std::string Base64Encode(const std::vector<unsigned char>& bytes) {
     return output;
 }
 
-std::string BuildTrapdoorOkJson(const std::vector<unsigned char>& trapdoorBytes) {
+std::string BuildTrapdoorOkJson(const std::vector<unsigned char>& trapdoorBytes,
+                                const std::string& fieldName = "shortlist_trapdoor_base64") {
     std::ostringstream out;
     out << "{";
     out << "\"status\":\"ok\",";
-    out << "\"shortlist_trapdoor_base64\":\"" << Base64Encode(trapdoorBytes) << "\"";
+    out << "\"" << fieldName << "\":\"" << Base64Encode(trapdoorBytes) << "\"";
+    out << "}";
+    return out.str();
+}
+
+std::string BuildFixtureEncryptionOkJson(size_t keywordCount,
+                                         size_t secureIndexCount,
+                                         int payloadBytes,
+                                         uint64_t secureIndexChecksum,
+                                         const std::array<unsigned char, 32>& encryptedSessionKey) {
+    std::ostringstream out;
+    out << "{";
+    out << "\"status\":\"ok\",";
+    out << "\"keyword_count\":" << keywordCount << ",";
+    out << "\"secure_index_count\":" << secureIndexCount << ",";
+    out << "\"payload_bytes\":" << payloadBytes << ",";
+    out << "\"secure_index_checksum\":" << secureIndexChecksum << ",";
+    out << "\"encrypted_session_key_base64\":\""
+        << Base64Encode(std::vector<unsigned char>(encryptedSessionKey.begin(), encryptedSessionKey.end()))
+        << "\"";
     out << "}";
     return out.str();
 }
@@ -954,6 +1176,96 @@ Java_com_example_pqabse_1srmmobilehttp_NativeBridge_generateQueryArtifacts(
 
 extern "C"
 JNIEXPORT jstring JNICALL
+Java_com_example_pqabse_1srmmobilehttp_NativeBridge_benchmarkNativeFixtureEncryption(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jbyteArray phase1_params_bytes,
+    jstring keywords_csv,
+    jint payload_bytes) {
+#if !PQABSE_PREBUILT_AVAILABLE
+    const std::string message = BuildDecryptErrorJson(
+        BuildRuntimeStatus() + " Native fixture encryption cannot start because no native crypto prebuilts are loaded.");
+    return env->NewStringUTF(message.c_str());
+#else
+    try {
+        const auto paramsBytes = JByteArrayToVector(env, phase1_params_bytes);
+        const std::string keywordsCsv = JStringToStdString(env, keywords_csv);
+
+        SystemParams params{};
+        if (!ParseParamsText(paramsBytes, params)) {
+            const std::string error = BuildDecryptErrorJson("Failed to parse Phase 1 parameters");
+            return env->NewStringUTF(error.c_str());
+        }
+
+        const auto keywords = SplitCsv(keywordsCsv);
+        if (keywords.empty()) {
+            const std::string error = BuildDecryptErrorJson("No fixture keywords provided");
+            return env->NewStringUTF(error.c_str());
+        }
+
+        std::array<unsigned char, 32> sessionKey{};
+        std::array<unsigned char, 16> fileNonce{};
+        if (!FillRandomBytes(sessionKey.data(), sessionKey.size()) ||
+            !FillRandomBytes(fileNonce.data(), fileNonce.size())) {
+            const std::string error = BuildDecryptErrorJson("Failed to generate native random material");
+            return env->NewStringUTF(error.c_str());
+        }
+
+        const LogicalPolicy logicalPolicy = MakeAndPolicy({"role:benchmark", "clearance:mobile"});
+        const AccessPolicy policy = BuildAccessPolicy(logicalPolicy);
+        const std::string versionTag = "epoch-0";
+        const std::string reEncryptionMaterial;
+
+        CiphertextKey ctk;
+        ctk.policy = policy;
+        ctk.reencryption_tag = versionTag;
+        ctk.update_seed_commitment.fill(0);
+        ctk.policy_tag = EncodeBoundAccessPolicy(env, params, policy, versionTag, fileNonce, reEncryptionMaterial);
+        ctk.epoch_tag = EncodeEpochBinding(env, params, policy, versionTag, fileNonce, reEncryptionMaterial);
+
+        std::vector<unsigned char> seed(sessionKey.begin(), sessionKey.end());
+        const auto bindingSeed = BuildCiphertextBindingSeed(env, policy, versionTag, fileNonce, reEncryptionMaterial);
+        seed.insert(seed.end(), bindingSeed.begin(), bindingSeed.end());
+        seed.insert(seed.end(), policy.descriptor.begin(), policy.descriptor.end());
+        ctk.header_u = SampleUniformElement(env, params, seed, 2 * params.ring_dim);
+
+        const auto mask = DeriveMask(
+            env,
+            ctk.header_u,
+            ctk.policy_tag,
+            &ctk.epoch_tag,
+            ctk.reencryption_tag,
+            &ctk.update_seed_commitment);
+        for (size_t i = 0; i < ctk.encrypted_session_key.size(); ++i) {
+            ctk.encrypted_session_key[i] = static_cast<unsigned char>(sessionKey[i] ^ mask[i]);
+        }
+
+        const auto secureIndex = BuildSecureIndex(env, params, keywords, fileNonce);
+        uint64_t secureIndexChecksum = 0;
+        for (const auto& entry : secureIndex) {
+            TrapdoorElement copy = entry;
+            copy.SetFormat(Format::COEFFICIENT);
+            if (copy.GetLength() != 0) {
+                secureIndexChecksum ^= CoefficientToUint64(copy[0]);
+            }
+        }
+        const std::string okJson = BuildFixtureEncryptionOkJson(
+            keywords.size(),
+            secureIndex.size(),
+            std::max(0, static_cast<int>(payload_bytes)),
+            secureIndexChecksum,
+            ctk.encrypted_session_key);
+        return env->NewStringUTF(okJson.c_str());
+    } catch (const std::exception& exc) {
+        const std::string error =
+            BuildDecryptErrorJson(std::string("Native fixture encryption exception: ") + exc.what());
+        return env->NewStringUTF(error.c_str());
+    }
+#endif
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
 Java_com_example_pqabse_1srmmobilehttp_NativeBridge_generateShortlistTrapdoor(
     JNIEnv* env,
     jobject /* thiz */,
@@ -1000,6 +1312,80 @@ Java_com_example_pqabse_1srmmobilehttp_NativeBridge_generateShortlistTrapdoor(
         return env->NewStringUTF(okJson.c_str());
     } catch (const std::exception& exc) {
         const std::string error = BuildDecryptErrorJson(std::string("Native trapdoor exception: ") + exc.what());
+        return env->NewStringUTF(error.c_str());
+    }
+#endif
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_example_pqabse_1srmmobilehttp_NativeBridge_generateRetrieveTrapdoorForBundle(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jbyteArray phase1_params_bytes,
+    jbyteArray user_key_bytes,
+    jbyteArray bundle_bytes,
+    jstring preferred_label,
+    jstring keywords_csv) {
+#if !PQABSE_PREBUILT_AVAILABLE
+    const std::string message = BuildDecryptErrorJson(
+        BuildRuntimeStatus() + " Retrieve trapdoor generation cannot start because no native crypto prebuilts are loaded.");
+    return env->NewStringUTF(message.c_str());
+#else
+    try {
+        const auto paramsBytes = JByteArrayToVector(env, phase1_params_bytes);
+        const auto userKeyBytes = JByteArrayToVector(env, user_key_bytes);
+        const auto bundleBytes = JByteArrayToVector(env, bundle_bytes);
+        const std::string preferredLabel = JStringToStdString(env, preferred_label);
+        const std::string keywordsCsv = JStringToStdString(env, keywords_csv);
+
+        SystemParams params{};
+        if (!ParseParamsText(paramsBytes, params)) {
+            const std::string error = BuildDecryptErrorJson("Failed to parse Phase 1 parameters");
+            return env->NewStringUTF(error.c_str());
+        }
+
+        UserSecretKey userKey;
+        if (!LoadUserSecretKeyBytes(params, userKeyBytes, userKey)) {
+            const std::string error = BuildDecryptErrorJson("Failed to load user secret key");
+            return env->NewStringUTF(error.c_str());
+        }
+
+        CiphertextBundle bundle;
+        if (!LoadCiphertextBundleBytes(params, bundleBytes, bundle)) {
+            const std::string error = BuildDecryptErrorJson("Failed to load ciphertext bundle");
+            return env->NewStringUTF(error.c_str());
+        }
+
+        auto queryKeywords = SplitCsv(keywordsCsv);
+        if (queryKeywords.empty()) {
+            queryKeywords = bundle.keyword_set;
+        }
+        if (queryKeywords.empty()) {
+            const std::string error = BuildDecryptErrorJson("No retrieve keywords provided");
+            return env->NewStringUTF(error.c_str());
+        }
+
+        const std::string label =
+            preferredLabel.empty() ? userKey.gid + "__" + bundle.bundle_label + "__retrieve" : preferredLabel;
+        std::vector<unsigned char> trapdoorBytes;
+        if (!SerializeSearchTrapdoorWithNonce(
+                env,
+                params,
+                userKey,
+                bundle.file_nonce,
+                label,
+                queryKeywords,
+                trapdoorBytes)) {
+            const std::string error = BuildDecryptErrorJson("Failed to serialize retrieve trapdoor");
+            return env->NewStringUTF(error.c_str());
+        }
+
+        const std::string okJson = BuildTrapdoorOkJson(trapdoorBytes, "retrieve_trapdoor_base64");
+        return env->NewStringUTF(okJson.c_str());
+    } catch (const std::exception& exc) {
+        const std::string error =
+            BuildDecryptErrorJson(std::string("Native retrieve trapdoor exception: ") + exc.what());
         return env->NewStringUTF(error.c_str());
     }
 #endif
@@ -1090,4 +1476,82 @@ Java_com_example_pqabse_1srmmobilehttp_NativeBridge_decryptLatestQueryResult(
         return env->NewStringUTF(error.c_str());
     }
 #endif
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_example_pqabse_1srmmobilehttp_BenchmarkNativeBridge_getBridgeStatus(JNIEnv* env, jobject thiz) {
+    return Java_com_example_pqabse_1srmmobilehttp_NativeBridge_getBridgeStatus(env, thiz);
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_example_pqabse_1srmmobilehttp_BenchmarkNativeBridge_benchmarkNativeFixtureEncryption(
+    JNIEnv* env,
+    jobject thiz,
+    jbyteArray phase1_params_bytes,
+    jstring keywords_csv,
+    jint payload_bytes) {
+    return Java_com_example_pqabse_1srmmobilehttp_NativeBridge_benchmarkNativeFixtureEncryption(
+        env,
+        thiz,
+        phase1_params_bytes,
+        keywords_csv,
+        payload_bytes);
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_example_pqabse_1srmmobilehttp_BenchmarkNativeBridge_generateShortlistTrapdoor(
+    JNIEnv* env,
+    jobject thiz,
+    jbyteArray phase1_params_bytes,
+    jbyteArray user_key_bytes,
+    jstring preferred_label,
+    jstring keywords_csv) {
+    return Java_com_example_pqabse_1srmmobilehttp_NativeBridge_generateShortlistTrapdoor(
+        env,
+        thiz,
+        phase1_params_bytes,
+        user_key_bytes,
+        preferred_label,
+        keywords_csv);
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_example_pqabse_1srmmobilehttp_BenchmarkNativeBridge_generateRetrieveTrapdoorForBundle(
+    JNIEnv* env,
+    jobject thiz,
+    jbyteArray phase1_params_bytes,
+    jbyteArray user_key_bytes,
+    jbyteArray bundle_bytes,
+    jstring preferred_label,
+    jstring keywords_csv) {
+    return Java_com_example_pqabse_1srmmobilehttp_NativeBridge_generateRetrieveTrapdoorForBundle(
+        env,
+        thiz,
+        phase1_params_bytes,
+        user_key_bytes,
+        bundle_bytes,
+        preferred_label,
+        keywords_csv);
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_example_pqabse_1srmmobilehttp_BenchmarkNativeBridge_decryptLatestQueryResult(
+    JNIEnv* env,
+    jobject thiz,
+    jbyteArray phase1_params_bytes,
+    jbyteArray user_key_bytes,
+    jbyteArray shortlist_trapdoor_bytes,
+    jbyteArray bundle_bytes) {
+    return Java_com_example_pqabse_1srmmobilehttp_NativeBridge_decryptLatestQueryResult(
+        env,
+        thiz,
+        phase1_params_bytes,
+        user_key_bytes,
+        shortlist_trapdoor_bytes,
+        bundle_bytes);
 }
