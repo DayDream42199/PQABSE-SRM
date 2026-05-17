@@ -307,7 +307,12 @@ PQABSESRMMobileHTTP/app/src/main/native-prebuilt
 
 Open Android Studio, go to **More Actions > SDK Manager**, and verify that these components are installed:
 
-1. Android SDK Platform for the app compile SDK
+In the **SDK Platforms** tab:
+
+1. Android SDK Platform for the app compile SDK, such as **Android 14.0 ("UpsideDownCake")**.
+
+In the **SDK Tools** tab:
+
 2. Android SDK Build-Tools
 3. Android SDK Platform-Tools
 4. Android SDK Command-line Tools
@@ -317,7 +322,7 @@ Open Android Studio, go to **More Actions > SDK Manager**, and verify that these
 
 Then configure the Gradle JDK:
 
-1. Open **File > Settings > Build, Execution, Deployment > Build Tools > Gradle**.
+1. Open **Settings > Build, Execution, Deployment > Build Tools > Gradle**.
 2. Set **Gradle JDK** to version `21`.
 3. Select **JetBrains** as the vendor if Android Studio shows that option.
 
@@ -327,7 +332,7 @@ This helps prevent Gradle toolchain download failures on Windows.
 
 In Android Studio:
 
-1. Open **Device Manager**.
+1. Open **More Actions > Virtual Device Manager**.
 2. Click **Create a virtual device**.
 3. Select a recent Pixel device profile, such as **Pixel 7**.
 4. Install a recent Android system image.
