@@ -22,6 +22,24 @@ If your `TA`, `Edge`, and `CS` are deployed on cloud instances and the mobile si
 - [run_cloud_ta_trapdoor_experiments.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_ta_trapdoor_experiments.py)
 - [run_cloud_ta_revoke_experiments.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_ta_revoke_experiments.py)
 
+## Cloud Reference Models
+
+Use [run_cloud_reference_benchmarks.py](/home/daydream/PQABSE-SRM-httpnitro/benchmarks/run_cloud_reference_benchmarks.py) for competing-paper reference curves on the cloud/search-side axes. This is separate from the mobile benchmark pack and does not run Android tests.
+
+```bash
+python3 benchmarks/run_cloud_reference_benchmarks.py \
+  --metrics keygen,search,encryption,decryption,trapdoor \
+  --runs 5 \
+  --out RunFullSys/experiment_results/cloud_reference_results.csv
+```
+
+The runner writes:
+
+- `cloud_reference_raw.csv`
+- `cloud_reference_averages.csv`
+
+The included `b20`, `b30`, `b31`, `b32`, and `b33` rows are labeled as `reference_model` or `primitive_surrogate` in the CSV. They are benchmark-compatible reference curves, not full apples-to-apples implementations of the cited systems. Use `--list-models` to print the explicit model assumptions and supported metrics.
+
 This script measures server-side timings from the real cloud HTTP responses:
 
 - `encrypt_bundle_ms` from the `Edge` node
