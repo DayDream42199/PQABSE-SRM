@@ -454,4 +454,20 @@ In the Revocation and Refresh tab, enter the revoke target GID and press revoke 
 ---
 
 ## 5. Running the Experimentation
-...
+The experimentation workflow is divided into two parts: cloud-side benchmarking and local Android/mobile benchmarking.
+
+### 5.1 Cloud Experimentation
+
+Cloud experiments measure the deployed TA, Edge, and CS services through the benchmark runners in the repository's benchmark folder. Use this path when the backend services are running on cloud instances and you want CSV outputs for the server-side experiment families.
+
+For setup steps, runner descriptions, command examples, and output CSV details, see:
+
+- [benchmarks/README.md](benchmarks/README.md)
+
+### 5.2 Local Mobile Experimentation
+
+Local experiments measure Android/mobile-side behavior from the `PQABSESRMMobileHTTP` project. Use this path when running the Panda4 emulator and collecting mobile benchmark CSVs through the benchmark pack.
+
+For Android Studio steps, PowerShell commands, benchmark modes, and result-pulling instructions, see:
+
+- [PQABSESRMMobileHTTP/benchmark-pack/README.md](PQABSESRMMobileHTTP/benchmark-pack/README.md)
