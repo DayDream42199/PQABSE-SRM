@@ -478,6 +478,66 @@ The cloud experiment outputs are CSV files:
 - averaged results: `cloud_benchmark_results.csv`
 - per-run results: `cloud_benchmark_runs.csv`
 
+#### Cloud Reference Models
+
+The cloud/search-side reference experiment code is:
+
+```text
+benchmarks/run_cloud_reference_benchmarks.py
+```
+
+Use this runner when you need competing-paper reference curves for cloud-side comparison. It is separate from the Android mobile benchmark pack and does not run emulator tests.
+
+The included reference models are:
+
+| Paper/model | Model type | Supported metrics |
+| --- | --- | --- |
+| `b20` | `reference_model` | `search`, `encryption`, `decryption`, `trapdoor` |
+| `b30` | `primitive_surrogate` | `keygen` |
+| `b31` | `primitive_surrogate` | `keygen`, `encryption`, `decryption` |
+| `b32` | `primitive_surrogate` | `search`, `trapdoor` |
+| `b33` | `primitive_surrogate` | `search`, `trapdoor`, `encryption` |
+
+To print the model descriptions and assumptions:
+
+```bash
+cd ~/PQABSE-SRM
+python3 benchmarks/run_cloud_reference_benchmarks.py --list-models
+```
+
+To run all cloud reference models for all supported metrics:
+
+```bash
+cd ~/PQABSE-SRM
+python3 benchmarks/run_cloud_reference_benchmarks.py \
+  --metrics keygen,search,encryption,decryption,trapdoor \
+  --papers all \
+  --runs 5 \
+  --out RunFullSys/experiment_results/cloud_reference_results.csv
+```
+
+The `--out` value is an output hint. When a CSV path is supplied, the runner writes these two files next to it:
+
+- `RunFullSys/experiment_results/cloud_reference_raw.csv`
+- `RunFullSys/experiment_results/cloud_reference_averages.csv`
+
+The reference CSV columns include:
+
+- raw CSV: `paper`, `metric`, `scale_type`, `scale_value`, `run`, `ms`, `status`, `message`, `model_type`, `candidate_count`, `exact_match_count`
+- averages CSV: `paper`, `metric`, `scale_type`, `scale_value`, `runs`, `avg_ms`, `ok_runs`, `total_runs`, `status`, `message`, `model_type`, `avg_candidate_count`, `avg_exact_match_count`
+
+To run only selected papers or metrics, pass comma-separated values:
+
+```bash
+python3 benchmarks/run_cloud_reference_benchmarks.py \
+  --papers b20,b32,b33 \
+  --metrics search,trapdoor \
+  --runs 5 \
+  --out RunFullSys/experiment_results/cloud_reference_results.csv
+```
+
+These rows are labeled as `reference_model` or `primitive_surrogate` in the CSV. They are benchmark-compatible reference curves, not full apples-to-apples implementations of the cited systems.
+
 #### Step 1: Rebuild the Cloud Services
 
 Run these commands on the matching cloud instances before benchmarking, so the HTTP services include the timing fields used by the experiment scripts.
